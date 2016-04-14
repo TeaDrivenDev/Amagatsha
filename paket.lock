@@ -1,0 +1,6 @@
+NUGET
+  remote: https://www.nuget.org/api/v2
+  specs:
+    FAKE.Lib (4.25.4)
+    FsEye (2.1)
+    OpenMcdf (2.0.5739.40493)
