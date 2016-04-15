@@ -22,19 +22,11 @@ let prefixFileName prefix filePath =
 
 module Solution =
     let findSuo directory solutionName =
-        let rec find paths =
-            match paths with
-            | file :: tail ->
-                if File.Exists file
-                then Some file
-                else find tail
-            | [] -> None
-
         [
             Path.Combine(directory, ".vs", solutionName, "v14", ".suo")
             Path.Combine(directory, sprintf "%s.v12.suo" solutionName)
         ]
-        |> find
+        |> List.tryFind File.Exists
 
     let findSolutions directory =
         Directory.EnumerateFiles(directory, "*.sln")
