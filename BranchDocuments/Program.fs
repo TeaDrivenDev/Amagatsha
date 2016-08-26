@@ -8,20 +8,32 @@ let StorageFileName = "branchdocuments";
 [<Literal>]
 let DocumentWindowPositionsMcdfKey = "DocumentWindowPositions"
 
-let asSnd first second = first, second
 
-let toDictionary data =
-    let dictionary = Dictionary<_, _>()
+[<AutoOpen>]
+module Prelude =
+    let asSnd first second = first, second
 
-    data
-    |> Seq.iter (fun (key, value) -> dictionary.[key] <- value)
+    let toDictionary data =
+        let dictionary = Dictionary<_, _>()
 
-    dictionary
+        data
+        |> Seq.iter (fun (key, value) -> dictionary.[key] <- value)
 
-let prefixFileName prefix filePath =
-    Path.Combine(Path.GetDirectoryName(filePath), prefix + Path.GetFileName(filePath))
+        dictionary
 
-let (|KeyValuePair|) (kvp : KeyValuePair<_, _>) = kvp.Key, kvp.Value
+    let prefixFileName prefix filePath =
+        Path.Combine(Path.GetDirectoryName(filePath), prefix + Path.GetFileName(filePath))
+
+    let (|KeyValuePair|) (kvp : KeyValuePair<_, _>) = kvp.Key, kvp.Value
+
+type Operation = Save | Restore
+type Argument = Valid of Operation | Invalid of string
+
+let parseOperation args =
+    match args with
+    | [| "save" |] -> Valid Save
+    | [| "restore" |] -> Valid Restore
+    | _ -> args |> String.concat " " |> Invalid
 
 module Solution =
     let findSuo directory solutionName =
@@ -130,20 +142,20 @@ open Storage
 let main argv = 
     let directory = Environment.CurrentDirectory
 
-    match Solution.getBranchName directory with
-    | Some branch ->
-        match argv with
-        | [| "save" |] -> Some (update, "Saved")
-        | [| "restore" |] -> Some (restore, "Restored")
-        | _ -> None
-        |> function
-            | Some (action, message) ->
+    match parseOperation argv with
+    | Valid operation ->
+        match Solution.getBranchName directory with
+        | Some branch ->
+            match operation with
+            | Save -> update, "Saved"
+            | Restore -> restore, "Restored"
+            |> fun (action, message) ->
                 directory
                 |> Solution.findSolutions
                 |> Seq.iter (withSettings action branch)
 
                 printfn "%s document windows for branch '%s'." message branch
-            | None -> printfn "Unknown option '%A'" argv
-    | None -> printfn "Directory not under Git version control"
+        | None -> printfn "Directory not under Git version control"
+    | Invalid operation -> printfn "Unknown option '%s'" operation
 
     0
