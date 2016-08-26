@@ -28,14 +28,26 @@ module Prelude =
 
     let (|KeyValuePair|) (kvp : KeyValuePair<_, _>) = kvp.Key, kvp.Value
 
-type Operation = Save | Restore
-type Argument = Valid of Operation | Invalid of string
+[<AutoOpen>]
+module Infrastructure =
+    type Operation = Save | Restore
+    type Argument = Valid of Operation | Invalid of string
 
-let parseOperation args =
-    match args with
-    | [| "save" |] -> Valid Save
-    | [| "restore" |] -> Valid Restore
-    | _ -> args |> String.concat " " |> Invalid
+    let parseOperation args =
+        match args with
+        | [| "save" |] -> Valid Save
+        | [| "restore" |] -> Valid Restore
+        | _ -> args |> String.concat " " |> Invalid
+
+    let getBackupOnRestoreSetting () =
+        System.Configuration.ConfigurationManager.AppSettings.["backupOnRestore"]
+        |> function
+            | null -> false
+            | value ->
+                match bool.TryParse value with
+                | true, result -> result
+                | false, _ -> false
+
 
 module Solution =
     let findSuo directory solutionName =
@@ -122,12 +134,12 @@ module Storage =
 
         writeSettings directory solutionName settings
 
-    let restore directory solutionName branch suoFileName (settings : IDictionary<_, _>) =
+    let restore backupSuo directory solutionName branch suoFileName (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
         | true, data ->
-            Solution.backup "before" suoFileName
+            if backupSuo then Solution.backup "before" suoFileName
             data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
-            Solution.backup "after" suoFileName
+            if backupSuo then Solution.backup "after" suoFileName
         | false, _->
             printfn
                 "No document window data found for solution '%s' and branch '%s'"
@@ -155,7 +167,10 @@ let main argv =
         | Some branch ->
             match operation with
             | Save -> update, "Saved"
-            | Restore -> restore, "Restored"
+            | Restore ->
+                let backupSuo = getBackupOnRestoreSetting()
+
+                restore backupSuo, "Restored"
             |> fun (action, message) ->
                 directory
                 |> Solution.findSolutions
