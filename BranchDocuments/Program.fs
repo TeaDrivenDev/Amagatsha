@@ -3,7 +3,7 @@ open System.Collections.Generic
 open System.IO
 
 [<Literal>]
-let StorageFileName = "branchdocuments";
+let StorageFileSuffix = "branchdocuments";
 
 [<Literal>]
 let DocumentWindowPositionsMcdfKey = "DocumentWindowPositions"
@@ -23,6 +23,8 @@ module Prelude =
 
     let prefixFileName prefix filePath =
         Path.Combine(Path.GetDirectoryName(filePath), prefix + Path.GetFileName(filePath))
+
+    let suffixFilePath suffix filePath = sprintf "%s.%s" filePath suffix
 
     let (|KeyValuePair|) (kvp : KeyValuePair<_, _>) = kvp.Key, kvp.Value
 
@@ -58,6 +60,8 @@ module Solution =
     let splitPath solutionPath =
         Path.GetDirectoryName solutionPath, Path.GetFileNameWithoutExtension solutionPath
 
+    let backup suffix suoFilePath = File.Copy(suoFilePath, suffixFilePath suffix suoFilePath, true)
+
 module Mcdf =
     let readStream (path : string) streamName =
         use file = new OpenMcdf.CompoundFile(path)
@@ -90,7 +94,7 @@ module Mcdf =
         File.Move(tempFilePath, path)
 
 module Storage = 
-    let getSolutionStorageFileName solutionName = sprintf "%s.%s" solutionName StorageFileName
+    let getSolutionStorageFileName solutionName = suffixFilePath StorageFileSuffix solutionName
 
     let readSettings directory solutionName =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
@@ -120,7 +124,10 @@ module Storage =
 
     let restore directory solutionName branch suoFileName (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
-        | true, data -> data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
+        | true, data ->
+            Solution.backup "before" suoFileName
+            data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
+            Solution.backup "after" suoFileName
         | false, _->
             printfn
                 "No document window data found for solution '%s' and branch '%s'"
