@@ -50,12 +50,13 @@ module Infrastructure =
 
 
 module Solution =
-    let findSuo directory solutionName =
+    let findSuos directory solutionName =
         [
+            Path.Combine(directory, ".vs", solutionName, "v15", ".suo")
             Path.Combine(directory, ".vs", solutionName, "v14", ".suo")
             Path.Combine(directory, sprintf "%s.v12.suo" solutionName)
         ]
-        |> List.tryFind File.Exists
+        |> List.filter File.Exists
 
     let findSolutions directory = Directory.EnumerateFiles(directory, "*.sln")
 
@@ -108,7 +109,7 @@ module Mcdf =
 module Storage = 
     let getSolutionStorageFileName solutionName = suffixFilePath StorageFileSuffix solutionName
 
-    let readSettings directory solutionName =
+    let readWindowSettings directory solutionName =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         if File.Exists storageFileName
@@ -119,7 +120,7 @@ module Storage =
         else [| |]
         |> toDictionary
 
-    let writeSettings directory solutionName (data : IDictionary<_, byte array>) =
+    let writeWindowSettings directory solutionName (data : IDictionary<_, _>) =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         data
@@ -128,18 +129,27 @@ module Storage =
         |> asSnd storageFileName
         |> File.WriteAllLines
 
-    let update directory solutionName branch suoFileName (settings : IDictionary<_, _>) =
+    let updateStorage directory solutionName branch suos (settings : IDictionary<_, _>) =
+        let suoFileName =
+            suos
+            |> List.map FileInfo
+            |> List.sortByDescending (fun fi -> fi.LastWriteTime)
+            |> List.head
+            |> fun fi -> fi.FullName
+
         let documents = Mcdf.readSolutionDocuments suoFileName
         settings.[branch] <- documents
 
-        writeSettings directory solutionName settings
+        writeWindowSettings directory solutionName settings
 
-    let restore backupSuo directory solutionName branch suoFileName (settings : IDictionary<_, _>) =
+    let restoreToSuo backupSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
         | true, data ->
-            if backupSuo then Solution.backup "before" suoFileName
-            data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
-            if backupSuo then Solution.backup "after" suoFileName
+            suos
+            |> List.iter (fun suoFileName ->
+                if backupSuo then Solution.backup "before" suoFileName
+                data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
+                if backupSuo then Solution.backup "after" suoFileName)
         | false, _->
             printfn
                 "No document window data found for solution '%s' and branch '%s'"
@@ -149,11 +159,11 @@ module Storage =
     let withSettings action branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
 
-        match Solution.findSuo directory solutionName with
-        | Some suoFileName ->
-            readSettings directory solutionName
-            |> action directory solutionName branch suoFileName
-        | None -> printfn "No .suo file found for solution '%s'" solutionName
+        match Solution.findSuos directory solutionName with
+        | [] -> printfn "No .suo file found for solution '%s'" solutionName
+        | suos ->
+            readWindowSettings directory solutionName
+            |> action directory solutionName branch suos
 
 open Storage
 
@@ -166,11 +176,11 @@ let main argv =
         match Solution.getBranchName directory with
         | Some branch ->
             match operation with
-            | Save -> update, "Saved"
+            | Save -> updateStorage, "Saved"
             | Restore ->
                 let backupSuo = getBackupOnRestoreSetting()
 
-                restore backupSuo, "Restored"
+                restoreToSuo backupSuo, "Restored"
             |> fun (action, message) ->
                 directory
                 |> Solution.findSolutions
