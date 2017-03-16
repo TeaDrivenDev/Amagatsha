@@ -52,11 +52,11 @@ module Infrastructure =
 module Solution =
     let findSuos directory solutionName =
         [
-            Path.Combine(directory, ".vs", solutionName, "v15", ".suo")
-            Path.Combine(directory, ".vs", solutionName, "v14", ".suo")
-            Path.Combine(directory, sprintf "%s.v12.suo" solutionName)
+            Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), 2017
+            Path.Combine(directory, ".vs", solutionName, "v14", ".suo"), 2015
+            Path.Combine(directory, sprintf "%s.v12.suo" solutionName), 2013
         ]
-        |> List.filter File.Exists
+        |> List.filter (fst >> File.Exists)
 
     let findSolutions directory = Directory.EnumerateFiles(directory, "*.sln")
 
@@ -130,13 +130,14 @@ module Storage =
         |> File.WriteAllLines
 
     let updateStorage directory solutionName branch suos (settings : IDictionary<_, _>) =
-        let suoFileName =
+        let suoFileName, version =
             suos
-            |> List.map FileInfo
-            |> List.sortByDescending (fun fi -> fi.LastWriteTime)
+            |> List.map (fun (file, version) -> FileInfo file, version)
+            |> List.sortByDescending (fun (fi, _) -> fi.LastWriteTime)
             |> List.head
-            |> fun fi -> fi.FullName
+            |> fun (fi, version) -> fi.FullName, version
 
+        printfn "Newest .suo is for Visual Studio %i" version
         let documents = Mcdf.readSolutionDocuments suoFileName
         settings.[branch] <- documents
 
@@ -146,7 +147,7 @@ module Storage =
         match settings.TryGetValue branch with
         | true, data ->
             suos
-            |> List.iter (fun suoFileName ->
+            |> List.iter (fun (suoFileName, _) ->
                 if backupSuo then Solution.backup "before" suoFileName
                 data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
                 if backupSuo then Solution.backup "after" suoFileName)
