@@ -32,6 +32,11 @@ module Prelude =
 module Infrastructure =
     type Operation = Save | Restore
     type Argument = Valid of Operation | Invalid of string
+    type Result =
+        | Saved of string
+        | Restored of string list
+        | NoSuos
+        | NoDocumentData
 
     let parseOperation args =
         match args with
@@ -48,13 +53,23 @@ module Infrastructure =
                 | true, result -> result
                 | false, _ -> false
 
+    let getResultMessage branch solutionName result =
+        match result with
+        | Saved version ->
+            sprintf "Backed up document windows for '%s' from Visual Studio %s" solutionName version
+        | Restored versions ->
+            sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName (String.concat ", " versions)
+        | NoSuos ->
+            sprintf "No .suo files found for %s.sln" solutionName
+        | NoDocumentData ->
+            sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
 
 module Solution =
     let findSuos directory solutionName =
         [
-            Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), 2017
-            Path.Combine(directory, ".vs", solutionName, "v14", ".suo"), 2015
-            Path.Combine(directory, sprintf "%s.v12.suo" solutionName), 2013
+            Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), "2017"
+            Path.Combine(directory, ".vs", solutionName, "v14", ".suo"), "2015"
+            // Path.Combine(directory, sprintf "%s.v12.suo" solutionName), "2013"
         ]
         |> List.filter (fst >> File.Exists)
 
@@ -129,7 +144,7 @@ module Storage =
         |> asSnd storageFileName
         |> File.WriteAllLines
 
-    let updateStorage directory solutionName branch suos (settings : IDictionary<_, _>) =
+    let backupToStorage directory solutionName branch suos (settings : IDictionary<_, _>) =
         let suoFileName, version =
             suos
             |> List.map (fun (file, version) -> FileInfo file, version)
@@ -137,34 +152,41 @@ module Storage =
             |> List.head
             |> fun (fi, version) -> fi.FullName, version
 
-        printfn "Newest .suo is for Visual Studio %i" version
         let documents = Mcdf.readSolutionDocuments suoFileName
         settings.[branch] <- documents
 
         writeWindowSettings directory solutionName settings
+        Saved version
 
     let restoreToSuo backupSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
         | true, data ->
-            suos
-            |> List.iter (fun (suoFileName, _) ->
-                if backupSuo then Solution.backup "before" suoFileName
-                data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
-                if backupSuo then Solution.backup "after" suoFileName)
+            match suos with
+            | [] -> NoSuos
+            | _ ->
+                suos
+                |> List.map (fun (suoFileName, version) ->
+                    if backupSuo then Solution.backup "before" suoFileName
+                    data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
+                    if backupSuo then Solution.backup "after" suoFileName
+                    
+                    version)
+                |> Restored
         | false, _->
             printfn
                 "No document window data found for solution '%s' and branch '%s'"
                 solutionName
                 branch
 
+            NoDocumentData
+
     let withSettings action branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
 
-        match Solution.findSuos directory solutionName with
-        | [] -> printfn "No .suo file found for solution '%s'" solutionName
-        | suos ->
-            readWindowSettings directory solutionName
-            |> action directory solutionName branch suos
+        let suos = Solution.findSuos directory solutionName
+
+        readWindowSettings directory solutionName
+        |> action directory solutionName branch suos
 
 open Storage
 
@@ -177,17 +199,19 @@ let main argv =
         match Solution.getBranchName directory with
         | Some branch ->
             match operation with
-            | Save -> updateStorage, "Saved"
+            | Save -> backupToStorage
             | Restore ->
                 let backupSuo = getBackupOnRestoreSetting()
 
-                restoreToSuo backupSuo, "Restored"
-            |> fun (action, message) ->
+                restoreToSuo backupSuo
+            |> fun action ->
                 directory
                 |> Solution.findSolutions
-                |> Seq.iter (withSettings action branch)
-
-                printfn "%s document windows for branch '%s'." message branch
+                |> Seq.iter (fun solutionName ->
+                    solutionName
+                    |> withSettings action branch
+                    |> getResultMessage branch (Path.GetFileName solutionName)
+                    |> printfn "%s")
         | None -> printfn "Directory not under Git version control"
     | Invalid operation -> printfn "Unknown option '%s'" operation
 
