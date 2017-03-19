@@ -16,17 +16,19 @@ Visual Studio saves information on open documents (along with other settings) in
 This is a small command line tool that can do one of two things:
 
 - Extract the document window settings from a `.suo` file and remember them for the current Git branch
-- Overwrite the document window settings in the `.suo` file with those previously stored for the current branch
+- Overwrite the document window settings in the `.suo` files for supported Visual Studio versions with those previously stored for the current branch
 
 If `bd.exe` is in `$PATH`, the workflow is as follows:
 
 - If you need to switch branches, close the solution; this is necessary to make Visual Studio save the current window layout to the `.suo` file.
-- Run `bd save` in the repository's root directory. This will look for any `.sln` files in the directory, try to find the respective `.suo` files and add or update the entry with the current branch's name in `<solutionname>.branchdocuments`.
+- Run `bd save` in the repository's root directory. This will look for any `.sln` files in the directory, try to find the respective `.suo` files and add or update the entry with the current branch's name in `<solutionname>.branchdocuments`. If `.suo` files for more than one supported Visual Studio version (currently 2015 and 2017) are found, document window settings are backed up from the most recently changed one.
 - Checkout the other branch.
-- Run `bd restore`. This will look for an entry with the current branch name in the `.branchdocuments` file, and if found, will replace the document settings in the `.suo` file with that data.
+- Run `bd restore`. This will look for an entry with the current branch name in the `.branchdocuments` file, and if found, will replace the document settings in the `.suo` file with that data. If `.suo` files for more than one supported Visual Studio version (currently 2015 and 2017) are found, document window settings are restored into all of them.
 - Reopen the solution.
 
-This is probably too cumbersome for most people to use but helps me in the short term. A much nicer solution would be a Visual Studio extension that takes care of this, but that would obviously be a lot more effort, and I don't know how feasible that really would be. 
+- `bd cleanup <n>` removes document settings for branches that are older than `<n>` days.
+
+This is probably too cumbersome for most people to use but helps me in the short term. A much nicer solution would be a Visual Studio extension that takes care of this, but that would obviously be a lot more effort, and I don't know how feasible that really would be.
 
 
 ### Limitations
