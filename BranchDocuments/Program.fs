@@ -129,14 +129,21 @@ module Mcdf =
 module Storage = 
     let getSolutionStorageFileName solutionName = suffixFilePath StorageFileSuffix solutionName
 
+    let toTimeStamp (dateTime : DateTime) = dateTime.ToString "yyyyMMdd"
+
     let readWindowSettings directory solutionName =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         if File.Exists storageFileName
         then File.ReadAllLines storageFileName
              |> Array.map (fun s ->
-                let [| key; data |] = s.Split(':')
-                key, Convert.FromBase64String data)
+                let key, timestamp, data =
+                    match s.Split ':' with
+                    | [| key; data |] -> key, toTimeStamp DateTime.Now, data
+                    | [| key; timestamp; data |] -> key, timestamp, data
+                    | _ -> failwith "Error in data"
+
+                key, (timestamp, Convert.FromBase64String data))
         else [| |]
         |> toDictionary
 
@@ -144,8 +151,8 @@ module Storage =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         data
-        |> Seq.map (fun (KeyValuePair (key, value)) ->
-            value |> Convert.ToBase64String |> sprintf "%s:%s" key)
+        |> Seq.map (fun (KeyValuePair (key, (timestamp, value))) ->
+            value |> Convert.ToBase64String |> sprintf "%s:%s:%s" key timestamp)
         |> asSnd storageFileName
         |> File.WriteAllLines
 
@@ -158,14 +165,14 @@ module Storage =
             |> fun (fi, version) -> fi.FullName, version
 
         let documents = Mcdf.readSolutionDocuments suoFileName
-        settings.[branch] <- documents
+        settings.[branch] <- (toTimeStamp DateTime.Now, documents)
 
         writeWindowSettings directory solutionName settings
         Saved version
 
     let restoreToSuo backupSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
-        | true, data ->
+        | true, (_, data) ->
             match suos with
             | [] -> NoSuos
             | _ ->
