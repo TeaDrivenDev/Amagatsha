@@ -177,13 +177,7 @@ module Storage =
                     
                     version)
                 |> Restored
-        | false, _->
-            printfn
-                "No document window data found for solution '%s' and branch '%s'"
-                solutionName
-                branch
-
-            NoDocumentData
+        | false, _-> NoDocumentData
 
     let withSettings action branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
