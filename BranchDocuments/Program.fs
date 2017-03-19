@@ -30,19 +30,24 @@ module Prelude =
 
 [<AutoOpen>]
 module Infrastructure =
-    type Operation = Save | Restore
-    type Argument = Valid of Operation | Invalid of string
+    open Argu
+
+    type CliArgs =
+        | [<CliPrefix(CliPrefix.None)>] Save
+        | [<CliPrefix(CliPrefix.None)>] Restore
+        // | [<CliPrefix(CliPrefix.None)>] Purge of days:int
+        interface IArgParserTemplate with
+            member s.Usage =
+                match s with
+                | Save -> "Backup the document window settings from the most recently updated .suo file"
+                | Restore -> "Restore document window settings for the current branch to all supported .suo files"
+                // | Purge _ -> "Remove saved document window settings older than the given number of days"
+
     type Result =
         | Saved of string
         | Restored of string list
         | NoSuos
         | NoDocumentData
-
-    let parseOperation args =
-        match args with
-        | [| "save" |] -> Valid Save
-        | [| "restore" |] -> Valid Restore
-        | _ -> args |> String.concat " " |> Invalid
 
     let getBackupOnRestoreSetting () =
         System.Configuration.ConfigurationManager.AppSettings.["backupOnRestore"]
@@ -194,11 +199,13 @@ open Storage
 let main argv = 
     let directory = Environment.CurrentDirectory
 
-    match parseOperation argv with
-    | Valid operation ->
+    let argumentParser = Argu.ArgumentParser.Create<CliArgs>(programName = "bd")
+
+    match argumentParser.ParseCommandLine(argv, ignoreUnrecognized = true).GetAllResults() with
+    | [ arg ] ->
         match Solution.getBranchName directory with
         | Some branch ->
-            match operation with
+            match arg with
             | Save -> backupToStorage
             | Restore ->
                 let backupSuo = getBackupOnRestoreSetting()
@@ -213,6 +220,6 @@ let main argv =
                     |> getResultMessage branch (Path.GetFileName solutionName)
                     |> printfn "%s")
         | None -> printfn "Directory not under Git version control"
-    | Invalid operation -> printfn "Unknown option '%s'" operation
+    | _ -> printfn "%s" (argumentParser.PrintUsage())
 
     0
