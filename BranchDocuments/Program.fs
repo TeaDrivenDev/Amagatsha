@@ -35,19 +35,33 @@ module Infrastructure =
     type CliArgs =
         | [<CliPrefix(CliPrefix.None)>] Save
         | [<CliPrefix(CliPrefix.None)>] Restore
-        // | [<CliPrefix(CliPrefix.None)>] Purge of days:int
+        | [<CliPrefix(CliPrefix.None)>] Cleanup of daysToKeep:int
         interface IArgParserTemplate with
             member s.Usage =
                 match s with
                 | Save -> "Backup the document window settings from the most recently updated .suo file"
                 | Restore -> "Restore document window settings for the current branch to all supported .suo files"
-                // | Purge _ -> "Remove saved document window settings older than the given number of days"
+                | Cleanup _ -> "Remove saved document window settings older than the given number of days"
 
     type Result =
         | Saved of string
         | Restored of string list
+        | Removed of int
         | NoSuos
         | NoDocumentData
+        with
+        static member GetMessage branch solutionName result =
+            match result with
+                | Saved version ->
+                    sprintf "Backed up document windows for '%s' from Visual Studio %s" solutionName version
+                | Restored versions ->
+                    sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName (String.concat ", " versions)
+                | Removed count ->
+                    sprintf "Removed document window data for %i branches for '%s'" count solutionName
+                | NoSuos ->
+                    sprintf "No .suo files found for %s.sln" solutionName
+                | NoDocumentData ->
+                    sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
 
     let getBackupOnRestoreSetting () =
         System.Configuration.ConfigurationManager.AppSettings.["backupOnRestore"]
@@ -57,17 +71,6 @@ module Infrastructure =
                 match bool.TryParse value with
                 | true, result -> result
                 | false, _ -> false
-
-    let getResultMessage branch solutionName result =
-        match result with
-        | Saved version ->
-            sprintf "Backed up document windows for '%s' from Visual Studio %s" solutionName version
-        | Restored versions ->
-            sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName (String.concat ", " versions)
-        | NoSuos ->
-            sprintf "No .suo files found for %s.sln" solutionName
-        | NoDocumentData ->
-            sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
 
 module Solution =
     let findSuos directory solutionName =
@@ -129,7 +132,13 @@ module Mcdf =
 module Storage = 
     let getSolutionStorageFileName solutionName = suffixFilePath StorageFileSuffix solutionName
 
-    let toTimeStamp (dateTime : DateTime) = dateTime.ToString "yyyyMMdd"
+    [<Literal>]
+    let TimestampFormat = "yyyyMMdd"
+
+    let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
+
+    let parseTimestamp s =
+        DateTime.ParseExact(s, TimestampFormat, Globalization.CultureInfo.InvariantCulture)
 
     let readWindowSettings directory solutionName =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
@@ -139,7 +148,7 @@ module Storage =
              |> Array.map (fun s ->
                 let key, timestamp, data =
                     match s.Split ':' with
-                    | [| key; data |] -> key, toTimeStamp DateTime.Now, data
+                    | [| key; data |] -> key, toTimestamp DateTime.Now, data
                     | [| key; timestamp; data |] -> key, timestamp, data
                     | _ -> failwith "Error in data"
 
@@ -165,7 +174,7 @@ module Storage =
             |> fun (fi, version) -> fi.FullName, version
 
         let documents = Mcdf.readSolutionDocuments suoFileName
-        settings.[branch] <- (toTimeStamp DateTime.Now, documents)
+        settings.[branch] <- (toTimestamp DateTime.Now, documents)
 
         writeWindowSettings directory solutionName settings
         Saved version
@@ -185,6 +194,18 @@ module Storage =
                     version)
                 |> Restored
         | false, _-> NoDocumentData
+
+    let cleanupStorage daysToKeep directory solutionName _ _ (settings : IDictionary<_, _>) =
+        let oldBranches =
+            settings
+            |> Seq.filter (fun (KeyValuePair (key, (timestamp, data))) ->
+                (DateTime.Now - parseTimestamp timestamp).Days > daysToKeep)
+            |> Seq.toList
+
+        oldBranches |> List.iter (settings.Remove >> ignore)
+        writeWindowSettings directory solutionName settings
+
+        Removed oldBranches.Length
 
     let withSettings action branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
@@ -212,13 +233,14 @@ let main argv =
                 let backupSuo = getBackupOnRestoreSetting()
 
                 restoreToSuo backupSuo
+            | Cleanup daysToKeep -> cleanupStorage daysToKeep
             |> fun action ->
                 directory
                 |> Solution.findSolutions
                 |> Seq.iter (fun solutionName ->
                     solutionName
                     |> withSettings action branch
-                    |> getResultMessage branch (Path.GetFileName solutionName)
+                    |> Result.GetMessage branch (Path.GetFileName solutionName)
                     |> printfn "%s")
         | None -> printfn "Directory not under Git version control"
     | _ -> printfn "%s" (argumentParser.PrintUsage())
