@@ -1,6 +1,7 @@
+FRAMEWORK: NET461, NET462
 NUGET
   remote: https://www.nuget.org/api/v2
-  specs:
-    FAKE.Lib (4.25.4)
+    Argu (3.7)
+    FAKE.Lib (4.56)
     FsEye (2.1)
-    OpenMcdf (2.0.5739.40493)
+    OpenMcdf (2.1.2.1274)
