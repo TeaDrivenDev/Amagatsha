@@ -63,15 +63,6 @@ module Infrastructure =
                 | NoDocumentData ->
                     sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
 
-    let getBackupOnRestoreSetting () =
-        System.Configuration.ConfigurationManager.AppSettings.["backupOnRestore"]
-        |> function
-            | null -> false
-            | value ->
-                match bool.TryParse value with
-                | true, result -> result
-                | false, _ -> false
-
 module Solution =
     let findSuos directory solutionName =
         [
@@ -95,8 +86,6 @@ module Solution =
 
     let splitPath solutionPath =
         Path.GetDirectoryName solutionPath, Path.GetFileNameWithoutExtension solutionPath
-
-    let backup suffix suoFilePath = File.Copy(suoFilePath, suffixFilePath suffix suoFilePath, true)
 
 module Mcdf =
     let readStream (path : string) streamName =
@@ -179,7 +168,7 @@ module Storage =
         writeWindowSettings directory solutionName settings
         Saved version
 
-    let restoreToSuo backupSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
+    let restoreToSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
         | true, (_, data) ->
             match suos with
@@ -187,9 +176,7 @@ module Storage =
             | _ ->
                 suos
                 |> List.map (fun (suoFileName, version) ->
-                    if backupSuo then Solution.backup "before" suoFileName
                     data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
-                    if backupSuo then Solution.backup "after" suoFileName
                     
                     version)
                 |> Restored
@@ -229,10 +216,7 @@ let main argv =
         | Some branch ->
             match arg with
             | Save -> backupToStorage
-            | Restore ->
-                let backupSuo = getBackupOnRestoreSetting()
-
-                restoreToSuo backupSuo
+            | Restore -> restoreToSuo
             | Cleanup daysToKeep -> cleanupStorage daysToKeep
             |> fun action ->
                 directory
