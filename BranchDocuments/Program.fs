@@ -224,7 +224,7 @@ let main argv =
                 |> Seq.iter (fun solutionName ->
                     solutionName
                     |> withSettings action branch
-                    |> Result.GetMessage branch (Path.GetFileName solutionName)
+                    |> Result.GetMessage branch (Path.GetFileNameWithoutExtension solutionName)
                     |> printfn "%s")
         | None -> printfn "Directory not under Git version control"
     | _ -> printfn "%s" (argumentParser.PrintUsage())
