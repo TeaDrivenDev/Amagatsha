@@ -5,3 +5,8 @@ nuget argu
 nuget FAKE.Lib
 nuget FsEye
 nuget OpenMcdf
+
+group Build
+    source https://nuget.org/api/v2
+
+    nuget FAKE
