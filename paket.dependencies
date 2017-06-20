@@ -4,6 +4,7 @@ framework: net461, net462
 nuget argu
 nuget FAKE.Lib
 nuget FsEye
+nuget FSharp.Core
 nuget OpenMcdf
 
 group Build
