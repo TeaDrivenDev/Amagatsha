@@ -43,6 +43,10 @@ module Infrastructure =
                 | Restore -> "Restore document window settings for the current branch to all supported .suo files"
                 | Cleanup _ -> "Remove saved document window settings older than the given number of days"
 
+    type BranchName = BranchName of string
+    type Timestamp = Timestamp of string
+    type DocumentData = DocumentData of byte []
+
     type Result =
         | Saved of string
         | Restored of string list
@@ -50,7 +54,7 @@ module Infrastructure =
         | NoSuos
         | NoDocumentData
         with
-        static member GetMessage branch solutionName result =
+        static member GetMessage (BranchName branch) solutionName result =
             match result with
                 | Saved version ->
                     sprintf "Backed up document windows for '%s' from Visual Studio %s" solutionName version
@@ -81,7 +85,7 @@ module Solution =
             else Path.GetDirectoryName path
 
         try
-            directory |> Fake.Git.Information.getBranchName |> Some
+            directory |> Fake.Git.Information.getBranchName |> BranchName |> Some
         with :? ArgumentException -> None
 
     let splitPath solutionPath =
@@ -124,7 +128,7 @@ module Storage =
     [<Literal>]
     let TimestampFormat = "yyyyMMdd"
 
-    let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
+    let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat |> Timestamp
 
     let parseTimestamp s =
         DateTime.ParseExact(s, TimestampFormat, Globalization.CultureInfo.InvariantCulture)
@@ -137,11 +141,11 @@ module Storage =
              |> Array.map (fun s ->
                 let key, timestamp, data =
                     match s.Split ':' with
-                    | [| key; data |] -> key, toTimestamp DateTime.Now, data
-                    | [| key; timestamp; data |] -> key, timestamp, data
+                    | [| key; data |] -> BranchName key, toTimestamp DateTime.Now, data
+                    | [| key; timestamp; data |] -> BranchName key, Timestamp timestamp, data
                     | _ -> failwith "Error in data"
 
-                key, (timestamp, Convert.FromBase64String data))
+                key, (timestamp, data |> Convert.FromBase64String |> DocumentData))
         else [| |]
         |> toDictionary
 
@@ -149,7 +153,7 @@ module Storage =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         data
-        |> Seq.map (fun (KeyValuePair (key, (timestamp, value))) ->
+        |> Seq.map (fun (KeyValuePair (BranchName key, (Timestamp timestamp, DocumentData value))) ->
             value |> Convert.ToBase64String |> sprintf "%s:%s:%s" key timestamp)
         |> asSnd storageFileName
         |> File.WriteAllLines
@@ -163,14 +167,14 @@ module Storage =
             |> fun (fi, version) -> fi.FullName, version
 
         let documents = Mcdf.readSolutionDocuments suoFileName
-        settings.[branch] <- (toTimestamp DateTime.Now, documents)
+        settings.[branch] <- (toTimestamp DateTime.Now, DocumentData documents)
 
         writeWindowSettings directory solutionName settings
         Saved version
 
     let restoreToSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
-        | true, (_, data) ->
+        | true, (_, DocumentData data) ->
             match suos with
             | [] -> NoSuos
             | _ ->
@@ -185,7 +189,7 @@ module Storage =
     let cleanupStorage daysToKeep directory solutionName _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (key, (timestamp, data))) ->
+            |> Seq.filter (fun (KeyValuePair (BranchName key, (Timestamp timestamp, data))) ->
                 (DateTime.Now - parseTimestamp timestamp).Days > daysToKeep)
             |> Seq.toList
 
