@@ -4,7 +4,7 @@ System.IO.Directory.SetCurrentDirectory __SOURCE_DIRECTORY__
 
 open Fake
 
-let solutionFile  = "BranchDocuments.sln"
+let solutionFile  = "Amagatsha.sln"
 
 Target "Build" (fun _ ->
     !! solutionFile

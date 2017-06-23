@@ -212,7 +212,7 @@ open Storage
 let main argv = 
     let directory = Environment.CurrentDirectory
 
-    let argumentParser = Argu.ArgumentParser.Create<CliArgs>(programName = "bd")
+    let argumentParser = Argu.ArgumentParser.Create<CliArgs>()
 
     match argumentParser.ParseCommandLine(argv, ignoreUnrecognized = true).GetAllResults() with
     | [ arg ] ->
