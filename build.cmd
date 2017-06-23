@@ -1,6 +1,6 @@
 @echo off
 
-.paket\paket.bootstrapper.exe
+if not exist .paket\paket.exe .paket\paket.bootstrapper.exe
 
 .paket\paket.exe restore
 if errorlevel 1 (
