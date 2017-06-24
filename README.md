@@ -35,6 +35,13 @@ This is probably too cumbersome for most people to use but helps me in the short
 
 This currently only works when running `amagatsha.exe` in the directory that contains the `.sln` file.
 
+### Building
+
+Clone the repository and run `build.cmd` or build the solution in Visual Studio.
+
+If you just want to use the application, download the zip file from the **Releases** section.
+
+
 ### Amawhat?
 
 ***Amagatsha*** is Zulu for "branches".
