@@ -8,6 +8,8 @@ nuget FSharp.Core
 nuget OpenMcdf
 
 group Build
+    content: none
     source https://nuget.org/api/v2
 
     nuget FAKE
+    github fsharp/FAKE modules/Octokit/Octokit.fsx
