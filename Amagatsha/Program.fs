@@ -67,6 +67,17 @@ module Infrastructure =
                 | NoDocumentData ->
                     sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
 
+    let printVersion () =
+        let productName, version =
+            let assembly = System.Reflection.Assembly.GetExecutingAssembly()
+
+            let fileVersionInfo =
+                System.Diagnostics.FileVersionInfo.GetVersionInfo assembly.Location
+
+            fileVersionInfo.ProductName, assembly.GetName().Version
+
+        printfn "%s v%i.%i.%i" productName version.Major version.Minor version.Build
+
 module Solution =
     let findSuos directory solutionName =
         [
@@ -209,7 +220,9 @@ module Storage =
 open Storage
 
 [<EntryPoint>]
-let main argv = 
+let main argv =
+    printVersion ()
+
     let directory = Environment.CurrentDirectory
 
     let argumentParser = Argu.ArgumentParser.Create<CliArgs>()

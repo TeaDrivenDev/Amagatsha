@@ -8,7 +8,7 @@
     <ProjectGuid>f2ee7022-08bd-4ccd-8a27-549bd2b5645e</ProjectGuid>
     <OutputType>Exe</OutputType>
     <RootNamespace>Amagatsha</RootNamespace>
-    <AssemblyName>Amagatsha</AssemblyName>
+    <AssemblyName>amagatsha</AssemblyName>
     <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <TargetFSharpCoreVersion>4.4.1.0</TargetFSharpCoreVersion>
