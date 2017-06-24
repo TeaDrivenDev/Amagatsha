@@ -71,7 +71,7 @@ Target "ReleaseGitHub" (fun _ ->
         |> function None -> gitHome + "/" + gitName | Some (s: string) -> s.Split().[0]
 
     StageAll ""
-    Git.Commit.Commit "" (sprintf "Bump version to %s" release.NugetVersion)
+    Git.Commit.Commit "" (sprintf "Release version %s" release.NugetVersion)
     Branches.pushBranch "" remote (Information.getBranchName "")
 
     Branches.tag "" release.NugetVersion

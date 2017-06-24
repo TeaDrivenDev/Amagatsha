@@ -39,7 +39,7 @@ This currently only works when running `amagatsha.exe` in the directory that con
 
 Clone the repository and run `build.cmd` or build the solution in Visual Studio.
 
-If you just want to use the application, download the zip file from the **Releases** section.
+If you just want to use the application, download the zip file from the [**Releases**](https://github.com/TeaDrivenDev/Amagatsha/releases) section.
 
 
 ### Amawhat?
