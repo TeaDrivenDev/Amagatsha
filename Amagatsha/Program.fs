@@ -8,7 +8,6 @@ let StorageFileSuffix = "branchdocuments";
 [<Literal>]
 let DocumentWindowPositionsMcdfKey = "DocumentWindowPositions"
 
-
 [<AutoOpen>]
 module Prelude =
     let asSnd first second = first, second
@@ -22,7 +21,7 @@ module Prelude =
         dictionary
 
     let prefixFileName prefix filePath =
-        Path.Combine(Path.GetDirectoryName(filePath), prefix + Path.GetFileName(filePath))
+        Path.Combine(Path.GetDirectoryName filePath, prefix + Path.GetFileName filePath)
 
     let suffixFilePath suffix filePath = sprintf "%s.%s" filePath suffix
 
@@ -33,11 +32,12 @@ module Infrastructure =
     open Argu
     open Fake.Git
 
+    [<CliPrefix(CliPrefix.None)>]
     type CliArgs =
-        | [<CliPrefix(CliPrefix.None)>] Save
-        | [<CliPrefix(CliPrefix.None)>] SavePrevious
-        | [<CliPrefix(CliPrefix.None)>] Restore
-        | [<CliPrefix(CliPrefix.None)>] Cleanup of daysToKeep:int
+        | Save
+        | SavePrevious
+        | Restore
+        | Cleanup of daysToKeep:int
         interface IArgParserTemplate with
             member s.Usage =
                 match s with
