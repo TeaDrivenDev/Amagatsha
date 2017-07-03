@@ -2,7 +2,7 @@ RESTRICTION: || (== net461) (== net462)
 NUGET
   remote: https://www.nuget.org/api/v2
     Argu (3.7)
-    FAKE.Lib (4.61.3)
+    FAKE.Lib (4.62.1)
     FsEye (2.1)
     FSharp.Core (4.2.1)
     OpenMcdf (2.1.3.34720)
@@ -11,7 +11,7 @@ GROUP Build
 CONTENT: NONE
 NUGET
   remote: https://www.nuget.org/api/v2
-    FAKE (4.61.3)
+    FAKE (4.62.1)
     Microsoft.Bcl (1.1.10) - content: none, restriction: && (< net45) (< win8) (< portable-win81+wpa81)
       Microsoft.Bcl.Build (>= 1.0.14)
     Microsoft.Bcl.Build (1.0.21) - import_targets: false, content: none, restriction: && (< net45) (< win8) (< portable-win81+wpa81)
@@ -22,5 +22,5 @@ NUGET
       Microsoft.Net.Http  - restriction: && (< net45) (< win8) (< portable-win81+wpa81)
 GITHUB
   remote: fsharp/FAKE
-    modules/Octokit/Octokit.fsx (15e1b741f4ae9fbaad640a65231dfcec28ce6ddd)
+    modules/Octokit/Octokit.fsx (b5933798c1944051bf358a460fcdc8ffbd678dfc)
       Octokit (>= 0.20)
