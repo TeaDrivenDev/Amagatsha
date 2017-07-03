@@ -31,15 +31,19 @@ module Prelude =
 [<AutoOpen>]
 module Infrastructure =
     open Argu
+    open Fake.Git
 
     type CliArgs =
         | [<CliPrefix(CliPrefix.None)>] Save
+        | [<CliPrefix(CliPrefix.None)>] SavePrevious
         | [<CliPrefix(CliPrefix.None)>] Restore
         | [<CliPrefix(CliPrefix.None)>] Cleanup of daysToKeep:int
         interface IArgParserTemplate with
             member s.Usage =
                 match s with
                 | Save -> "Backup the document window settings from the most recently updated .suo file"
+                | SavePrevious ->
+                    "Backup the document window settings from the most recently updated .suo file for the last previously checked out branch"
                 | Restore -> "Restore document window settings for the current branch to all supported .suo files"
                 | Cleanup _ -> "Remove saved document window settings older than the given number of days"
 
@@ -48,24 +52,39 @@ module Infrastructure =
     type DocumentData = DocumentData of byte []
 
     type Result =
-        | Saved of string
-        | Restored of string list
-        | Removed of int
+        | Saved of branchName:BranchName * vsVersion:string
+        | Restored of vsVersions:string list
+        | Removed of count:int
         | NoSuos
-        | NoDocumentData
+        | NoDocumentData of BranchName
+        | NoPreviousBranch
         with
-        static member GetMessage (BranchName branch) solutionName result =
+        static member GetMessage solutionName result =
             match result with
-                | Saved version ->
-                    sprintf "Backed up document windows for '%s' from Visual Studio %s" solutionName version
-                | Restored versions ->
-                    sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName (String.concat ", " versions)
-                | Removed count ->
-                    sprintf "Removed document window data for %i branches for '%s'" count solutionName
-                | NoSuos ->
-                    sprintf "No .suo files found for %s.sln" solutionName
-                | NoDocumentData ->
-                    sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
+            | Saved (BranchName branch, vsVersion) ->
+                sprintf "Backed up document windows for '%s' on branch '%s' from Visual Studio %s" solutionName branch vsVersion
+            | Restored vsVersions ->
+                sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName (String.concat ", " vsVersions)
+            | Removed count ->
+                sprintf "Removed document window data for %i branches for '%s'" count solutionName
+            | NoSuos ->
+                sprintf "No .suo files found for %s.sln" solutionName
+            | NoDocumentData (BranchName branch) ->
+                sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
+            | NoPreviousBranch ->
+                sprintf "No previously checked out branch found"
+
+    let getPreviousBranchName directory =
+        let branches =
+            "rev-parse --abbrev-ref @{-1}"
+            |> getGitResult directory
+            |> Seq.toList
+
+        branches
+        |> function
+            | [ "@{-1}" ] -> None
+            | [ branch ] -> branch |> BranchName |> Some
+            | _ -> None
 
     let printVersion () =
         let productName, version =
@@ -181,7 +200,13 @@ module Storage =
         settings.[branch] <- (toTimestamp DateTime.Now, DocumentData documents)
 
         writeWindowSettings directory solutionName settings
-        Saved version
+        Saved (branch, version)
+
+    let backupForPreviousBranch directory solutionName _ suos (settings : IDictionary<_, _>) =
+        getPreviousBranchName directory
+        |> Option.map (fun branch ->
+            backupToStorage directory solutionName branch suos settings)
+        |> Option.defaultValue NoPreviousBranch
 
     let restoreToSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
@@ -195,7 +220,7 @@ module Storage =
                     
                     version)
                 |> Restored
-        | false, _-> NoDocumentData
+        | false, _-> NoDocumentData branch
 
     let cleanupStorage daysToKeep directory solutionName _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
@@ -214,8 +239,11 @@ module Storage =
 
         let suos = Solution.findSuos directory solutionName
 
-        readWindowSettings directory solutionName
-        |> action directory solutionName branch suos
+        match suos with
+        | [] -> NoSuos
+        | _ ->
+            readWindowSettings directory solutionName
+            |> action directory solutionName branch suos
 
 open Storage
 
@@ -233,6 +261,7 @@ let main argv =
         | Some branch ->
             match arg with
             | Save -> backupToStorage
+            | SavePrevious -> backupForPreviousBranch
             | Restore -> restoreToSuo
             | Cleanup daysToKeep -> cleanupStorage daysToKeep
             |> fun action ->
@@ -241,7 +270,7 @@ let main argv =
                 |> Seq.iter (fun solutionName ->
                     solutionName
                     |> withSettings action branch
-                    |> Result.GetMessage branch (Path.GetFileNameWithoutExtension solutionName)
+                    |> Result.GetMessage (Path.GetFileNameWithoutExtension solutionName)
                     |> printfn "%s")
         | None -> printfn "Directory not under Git version control"
     | _ -> printfn "%s" (argumentParser.PrintUsage())
