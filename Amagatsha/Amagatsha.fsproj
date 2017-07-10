@@ -63,6 +63,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Program.fs" />
+    <None Include="Script1.fsx" />
     <None Include="App.config" />
     <None Include="paket.references" />
   </ItemGroup>

@@ -83,6 +83,15 @@ module Infrastructure =
 
     type BranchName = BranchName of string
     type Timestamp = Timestamp of string
+    type Protection = Protected | NotProtected
+        with static member Parse s =
+                match s with
+                | "x" -> Protected
+                | _ -> NotProtected
+             override p.ToString() =
+                match p with
+                | Protected -> "x"
+                | NotProtected -> "o"
     type DocumentData = DocumentData of byte []
 
     type Result =
@@ -208,13 +217,16 @@ module Storage =
         if File.Exists storageFileName
         then File.ReadAllLines storageFileName
              |> Array.map (fun s ->
-                let key, timestamp, data =
+                let key, timestamp, protection, data =
                     match s.Split ':' with
-                    | [| key; data |] -> BranchName key, toTimestamp DateTime.Now, data
-                    | [| key; timestamp; data |] -> BranchName key, Timestamp timestamp, data
+                    | [| key; data |] -> BranchName key, toTimestamp DateTime.Now, NotProtected, data
+                    | [| key; timestamp; data |] ->
+                        BranchName key, Timestamp timestamp, NotProtected, data
+                    | [| key; timestamp; protection; data |] ->
+                        BranchName key, Timestamp timestamp, Protection.Parse protection, data
                     | _ -> failwith "Error in data"
 
-                key, (timestamp, data |> Convert.FromBase64String |> DocumentData))
+                key, (timestamp, protection, data |> Convert.FromBase64String |> DocumentData))
         else [| |]
         |> toDictionary
 
@@ -222,8 +234,8 @@ module Storage =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         data
-        |> Seq.map (fun (KeyValuePair (BranchName key, (Timestamp timestamp, DocumentData value))) ->
-            value |> Convert.ToBase64String |> sprintf "%s:%s:%s" key timestamp)
+        |> Seq.map (fun (KeyValuePair (BranchName key, (Timestamp timestamp, protection, DocumentData value))) ->
+            value |> Convert.ToBase64String |> sprintf "%s:%s:%s:%s" key timestamp (protection.ToString()))
         |> asSnd storageFileName
         |> File.WriteAllLines
 
@@ -236,7 +248,13 @@ module Storage =
             |> fun (fi, version) -> fi.FullName, version
 
         let documents = Mcdf.readSolutionDocuments suoFileName
-        settings.[branch] <- (toTimestamp DateTime.Now, DocumentData documents)
+
+        let protection =
+            match settings.TryGetValue branch with
+            | true, (_, protection, _) -> protection
+            | false, _ -> NotProtected
+
+        settings.[branch] <- (toTimestamp DateTime.Now, protection, DocumentData documents)
 
         writeWindowSettings directory solutionName settings
         Saved (branch, version)
@@ -249,7 +267,7 @@ module Storage =
 
     let restoreToSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
-        | true, (_, DocumentData data) ->
+        | true, (_, _, DocumentData data) ->
             match suos with
             | [] -> NoSuos
             | _ ->
@@ -264,8 +282,8 @@ module Storage =
     let cleanupStorage daysToKeep directory solutionName _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (BranchName key, (Timestamp timestamp, data))) ->
-                (DateTime.Now - parseTimestamp timestamp).Days > daysToKeep)
+            |> Seq.filter (fun (KeyValuePair (BranchName key, (Timestamp timestamp, protection, data))) ->
+                protection <> Protected && (DateTime.Now - parseTimestamp timestamp).Days > daysToKeep)
             |> Seq.toList
 
         oldBranches |> List.iter (settings.Remove >> ignore)
@@ -276,14 +294,17 @@ module Storage =
     let list option directory solutionName _ _ (settings : IDictionary<_, _>) =
         let sort =
             match option with
-            | A -> Seq.sortBy snd
-            | D -> Seq.sortBy fst
+            | A -> Seq.sortBy (fun (_, _, t) -> t)
+            | D -> Seq.sortBy (fun (f, _, _) -> f)
             | O -> id
 
         settings
-        |> Seq.map (fun (KeyValuePair (branch, (timestamp, _))) -> timestamp, branch)
+        |> Seq.map (fun (KeyValuePair (branch, (timestamp, protection, _))) ->
+            timestamp, protection, branch)
         |> sort
-        |> Seq.map (fun (Timestamp timestamp, BranchName branch) -> sprintf "%s\t%s" timestamp branch)
+        |> Seq.map (fun (Timestamp timestamp, protection, BranchName branch) ->
+            let protection = match protection with Protected -> "Protected" | NotProtected -> ""
+            sprintf "%s   %-12s %s" timestamp protection branch)
         |> Seq.toList
         |> List
 
