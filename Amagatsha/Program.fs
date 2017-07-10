@@ -44,6 +44,18 @@ module Infrastructure =
         textWriter.WriteLine s
         if curColor <> color then Console.ForegroundColor <- curColor
 
+    [<CliPrefix(CliPrefix.Dash)>]
+    type ListArgs  =
+        | A
+        | D
+        | O
+        interface IArgParserTemplate with
+            member s.Usage =
+                match s with
+                | A -> "List branches alphabetically"
+                | D -> "List branches by last write date"
+                | O -> "List branches in original order"
+
     type AmagatshaExiter() =
         interface IExiter with
             member __.Name = "Amagatsha exiter"
@@ -54,6 +66,7 @@ module Infrastructure =
 
     [<CliPrefix(CliPrefix.None)>]
     type CliArgs =
+        | List of ParseResults<ListArgs>
         | Save
         | SavePrevious
         | Restore
@@ -61,6 +74,7 @@ module Infrastructure =
         interface IArgParserTemplate with
             member s.Usage =
                 match s with
+                | List _ -> "List branches for which saved document window data exists"
                 | Save -> "Backup the document window settings from the most recently updated .suo file"
                 | SavePrevious ->
                     "Backup the document window settings from the most recently updated .suo file for the last previously checked out branch"
@@ -72,6 +86,7 @@ module Infrastructure =
     type DocumentData = DocumentData of byte []
 
     type Result =
+        | List of string list
         | Saved of branchName:BranchName * vsVersion:string
         | Restored of vsVersions:string list
         | Removed of count:int
@@ -81,6 +96,10 @@ module Infrastructure =
         with
         static member GetMessage solutionName result =
             match result with
+            | List items ->
+                sprintf "Saved document window data for solution '%s' exists for the following branches:" solutionName
+                :: items
+                |> String.concat Environment.NewLine
             | Saved (BranchName branch, vsVersion) ->
                 sprintf "Backed up document windows for '%s' on branch '%s' from Visual Studio %s" solutionName branch vsVersion
             | Restored vsVersions ->
@@ -254,6 +273,20 @@ module Storage =
 
         Removed oldBranches.Length
 
+    let list option directory solutionName _ _ (settings : IDictionary<_, _>) =
+        let sort =
+            match option with
+            | A -> Seq.sortBy snd
+            | D -> Seq.sortBy fst
+            | O -> id
+
+        settings
+        |> Seq.map (fun (KeyValuePair (branch, (timestamp, _))) -> timestamp, branch)
+        |> sort
+        |> Seq.map (fun (Timestamp timestamp, BranchName branch) -> sprintf "%s\t%s" timestamp branch)
+        |> Seq.toList
+        |> List
+
     let withSettings action branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
 
@@ -282,6 +315,11 @@ let main argv =
         match Solution.getBranchName directory with
         | Some branch ->
             match arg with
+            | CliArgs.List args ->
+                match args.GetAllResults() with
+                | head :: _ -> head
+                | [] -> ListArgs.A
+                |> Storage.list
             | Save -> backupToStorage
             | SavePrevious -> backupForPreviousBranch
             | Restore -> restoreToSuo
@@ -293,7 +331,7 @@ let main argv =
                     solutionName
                     |> withSettings action branch
                     |> Result.GetMessage (Path.GetFileNameWithoutExtension solutionName)
-                    |> printfn "%s")
+                    |> printfn "%s\n")
         | None -> printfn "Directory not under Git version control"
     | _ -> printfn "%s" (argumentParser.PrintUsage())
 
