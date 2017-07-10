@@ -327,11 +327,12 @@ let main argv =
             |> fun action ->
                 directory
                 |> Solution.findSolutions
-                |> Seq.iter (fun solutionName ->
+                |> Seq.map (fun solutionName ->
                     solutionName
                     |> withSettings action branch
-                    |> Result.GetMessage (Path.GetFileNameWithoutExtension solutionName)
-                    |> printfn "%s\n")
+                    |> Result.GetMessage (Path.GetFileNameWithoutExtension solutionName))
+                |> String.concat "\n\n"
+                |> printfn "%s"
         | None -> printfn "Directory not under Git version control"
     | _ -> printfn "%s" (argumentParser.PrintUsage())
 
