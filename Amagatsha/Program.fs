@@ -32,6 +32,26 @@ module Infrastructure =
     open Argu
     open Fake.Git
 
+    let traceColored color (s:string) = 
+        let curColor = Console.ForegroundColor
+        if curColor <> color then Console.ForegroundColor <- color
+        use textWriter = 
+            match color with
+            | ConsoleColor.Red -> Console.Error
+            | ConsoleColor.Yellow -> Console.Out
+            | _ -> Console.Out
+
+        textWriter.WriteLine s
+        if curColor <> color then Console.ForegroundColor <- curColor
+
+    type AmagatshaExiter() =
+        interface IExiter with
+            member __.Name = "Amagatsha exiter"
+            member __.Exit (msg, code) =
+                if code = ErrorCode.HelpText then
+                    printfn "%s" msg ; exit 0
+                else traceColored ConsoleColor.Red msg ; exit 1
+
     [<CliPrefix(CliPrefix.None)>]
     type CliArgs =
         | Save
@@ -253,9 +273,11 @@ let main argv =
 
     let directory = Environment.CurrentDirectory
 
-    let argumentParser = Argu.ArgumentParser.Create<CliArgs>()
+    let argumentParser =
+        Argu.ArgumentParser.Create<CliArgs>(helpTextMessage = "Help requested",
+                                            errorHandler = AmagatshaExiter())
 
-    match argumentParser.ParseCommandLine(argv, ignoreUnrecognized = true).GetAllResults() with
+    match argumentParser.ParseCommandLine(argv).GetAllResults() with
     | [ arg ] ->
         match Solution.getBranchName directory with
         | Some branch ->
