@@ -5,9 +5,6 @@ open System.IO
 [<Literal>]
 let StorageFileSuffix = "branchdocuments";
 
-[<Literal>]
-let DocumentWindowPositionsMcdfKey = "DocumentWindowPositions"
-
 [<AutoOpen>]
 module Prelude =
     let asSnd first second = first, second
@@ -42,25 +39,41 @@ module Domain =
                 | NotProtected -> "o"
     type DocumentData = DocumentData of byte []
 
+    type DirectoryPath = DirectoryPath of string
+    type SolutionName = SolutionName of string
+    type SolutionPath = SolutionPath of string
+        with static member SolutionName s =
+                match s with
+                | SolutionPath path ->
+                    path
+                    |> Path.GetFileNameWithoutExtension
+                    |> SolutionName
+    type SuoPath = SuoPath of string
+    type VsVersion = VsVersion of string
+    type McdfKey = McdfKey of string
+
     type Result =
         | List of string list
-        | Saved of branchName:BranchName * vsVersion:string
-        | Restored of vsVersions:string list
+        | Saved of BranchName * VsVersion
+        | Restored of VsVersion list
         | Removed of count:int
         | NoSuos
         | NoDocumentData of BranchName
         | NoPreviousBranch
         with
-        static member GetMessage solutionName result =
+        static member GetMessage (SolutionName solutionName) result =
             match result with
             | List items ->
                 sprintf "Saved document window data for solution '%s' exists for the following branches:" solutionName
                 :: items
                 |> String.concat Environment.NewLine
-            | Saved (BranchName branch, vsVersion) ->
+            | Saved (BranchName branch, VsVersion vsVersion) ->
                 sprintf "Backed up document windows for '%s' on branch '%s' from Visual Studio %s" solutionName branch vsVersion
             | Restored vsVersions ->
-                sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName (String.concat ", " vsVersions)
+                vsVersions
+                |> List.map (fun (VsVersion vsVersion) -> vsVersion)
+                |> String.concat ", "
+                |> sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName
             | Removed count ->
                 sprintf "Removed document window data for %i branches for '%s'" count solutionName
             | NoSuos ->
@@ -85,19 +98,7 @@ module Infrastructure =
 
         printfn "%s v%i.%i.%i" productName version.Major version.Minor version.Build
 
-    let getPreviousBranchName directory =
-        let branches =
-            "rev-parse --abbrev-ref @{-1}"
-            |> Fake.Git.CommandHelper.getGitResult directory
-            |> Seq.toList
-
-        branches
-        |> function
-            | [ "@{-1}" ] -> None
-            | [ branch ] -> branch |> BranchName |> Some
-            | _ -> None
-
-    let traceColored color (s:string) = 
+    let traceColored color (s : string) = 
         let curColor = Console.ForegroundColor
         if curColor <> color then Console.ForegroundColor <- color
         use textWriter = 
@@ -147,17 +148,20 @@ module Infrastructure =
                 | Cleanup _ -> "Remove saved document window settings older than the given number of days"
 
 module Solution =
-    let findSuos directory solutionName =
+    let findSuos (DirectoryPath directory) (SolutionName solutionName) =
         [
-            Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), "2017"
-            Path.Combine(directory, ".vs", solutionName, "v14", ".suo"), "2015"
+            Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), VsVersion "2017"
+            Path.Combine(directory, ".vs", solutionName, "v14", ".suo"), VsVersion "2015"
             // Path.Combine(directory, sprintf "%s.v12.suo" solutionName), "2013"
         ]
         |> List.filter (fst >> File.Exists)
+        |> List.map (fun (path, version) -> SuoPath path, version)
 
-    let findSolutions directory = Directory.EnumerateFiles(directory, "*.sln")
+    let findSolutions (DirectoryPath directory) =
+        Directory.EnumerateFiles(directory, "*.sln")
+        |> Seq.map SolutionPath
 
-    let getBranchName path =
+    let getBranchName (DirectoryPath path) =
         let directory =
             if File.GetAttributes path &&& FileAttributes.Directory = FileAttributes.Directory
             then path
@@ -167,11 +171,26 @@ module Solution =
             directory |> Fake.Git.Information.getBranchName |> BranchName |> Some
         with :? ArgumentException -> None
 
-    let splitPath solutionPath =
-        Path.GetDirectoryName solutionPath, Path.GetFileNameWithoutExtension solutionPath
+    let getPreviousBranchName (DirectoryPath directory) =
+        let branches =
+            "rev-parse --abbrev-ref @{-1}"
+            |> Fake.Git.CommandHelper.getGitResult directory
+            |> Seq.toList
+
+        branches
+        |> function
+            | [ "@{-1}" ] -> None
+            | [ branch ] -> branch |> BranchName |> Some
+            | _ -> None
+
+    let splitPath (SolutionPath solutionPath) =
+        DirectoryPath (Path.GetDirectoryName solutionPath),
+        SolutionName (Path.GetFileNameWithoutExtension solutionPath)
 
 module Mcdf =
-    let readStream (path : string) streamName =
+    let documentWindowPositionsMcdfKey = McdfKey "DocumentWindowPositions"
+
+    let readStream (SuoPath path) (McdfKey streamName) =
         use file = new OpenMcdf.CompoundFile(path)
 
         let stream = file.RootStorage.GetStream streamName
@@ -179,11 +198,12 @@ module Mcdf =
         let data = stream.GetData()
         file.Close()
 
-        data
+        DocumentData data
 
-    let readSolutionDocuments suoFilepath = readStream suoFilepath DocumentWindowPositionsMcdfKey
+    let readSolutionDocuments suoFilepath = 
+        readStream suoFilepath documentWindowPositionsMcdfKey
 
-    let replaceStream (path : string) streamName data =
+    let replaceStream (SuoPath path) (McdfKey streamName) (DocumentData data) =
         use file = new OpenMcdf.CompoundFile(path,
                                              OpenMcdf.CFSUpdateMode.Update,
                                              OpenMcdf.CFSConfiguration.Default)
@@ -202,21 +222,22 @@ module Mcdf =
         File.Move(tempFilePath, path)
 
 module Storage = 
-    let getSolutionStorageFileName solutionName = suffixFilePath StorageFileSuffix solutionName
+    let private getSolutionStorageFileName (SolutionName solutionName) =
+        suffixFilePath StorageFileSuffix solutionName
 
     [<Literal>]
     let TimestampFormat = "yyyyMMdd"
 
     let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat |> Timestamp
 
-    let parseTimestamp s =
+    let parseTimestamp (Timestamp s) =
         DateTime.ParseExact(s, TimestampFormat, Globalization.CultureInfo.InvariantCulture)
 
-    let readWindowSettings directory solutionName =
-        let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
+    let readWindowSettings (DirectoryPath directory) solutionName =
+        let storageFilePath = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
-        if File.Exists storageFileName
-        then File.ReadAllLines storageFileName
+        if File.Exists storageFilePath
+        then File.ReadAllLines storageFilePath
              |> Array.map (fun s ->
                 let key, timestamp, protection, data =
                     match s.Split ':' with
@@ -231,7 +252,7 @@ module Storage =
         else [| |]
         |> toDictionary
 
-    let writeWindowSettings directory solutionName (data : IDictionary<_, _>) =
+    let writeWindowSettings (DirectoryPath directory) solutionName (data : IDictionary<_, _>) =
         let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         data
@@ -243,10 +264,10 @@ module Storage =
     let backupToStorage directory solutionName branch suos (settings : IDictionary<_, _>) =
         let suoFileName, version =
             suos
-            |> List.map (fun (file, version) -> FileInfo file, version)
+            |> List.map (fun (SuoPath file, version) -> FileInfo file, version)
             |> List.sortByDescending (fun (fi, _) -> fi.LastWriteTime)
             |> List.head
-            |> fun (fi, version) -> fi.FullName, version
+            |> fun (fi, version) -> SuoPath fi.FullName, version
 
         let documents = Mcdf.readSolutionDocuments suoFileName
 
@@ -255,26 +276,27 @@ module Storage =
             | true, (_, protection, _) -> protection
             | false, _ -> NotProtected
 
-        settings.[branch] <- (toTimestamp DateTime.Now, protection, DocumentData documents)
+        settings.[branch] <- (toTimestamp DateTime.Now, protection, documents)
 
         writeWindowSettings directory solutionName settings
         Saved (branch, version)
 
     let backupForPreviousBranch directory solutionName _ suos (settings : IDictionary<_, _>) =
-        getPreviousBranchName directory
+        Solution.getPreviousBranchName directory
         |> Option.map (fun branch ->
             backupToStorage directory solutionName branch suos settings)
         |> Option.defaultValue NoPreviousBranch
 
     let restoreToSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
         match settings.TryGetValue branch with
-        | true, (_, _, DocumentData data) ->
+        | true, (_, _, data) ->
             match suos with
             | [] -> NoSuos
             | _ ->
                 suos
                 |> List.map (fun (suoFileName, version) ->
-                    data |> Mcdf.replaceStream suoFileName DocumentWindowPositionsMcdfKey
+                    data
+                    |> Mcdf.replaceStream suoFileName Mcdf.documentWindowPositionsMcdfKey
                     
                     version)
                 |> Restored
@@ -283,7 +305,7 @@ module Storage =
     let cleanupStorage daysToKeep directory solutionName _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (BranchName key, (Timestamp timestamp, protection, data))) ->
+            |> Seq.filter (fun (KeyValuePair (BranchName key, (timestamp, protection, data))) ->
                 protection <> Protected && (DateTime.Now - parseTimestamp timestamp).Days > daysToKeep)
             |> Seq.toList
 
@@ -292,9 +314,9 @@ module Storage =
 
         Removed oldBranches.Length
 
-    let list option directory solutionName _ _ (settings : IDictionary<_, _>) =
+    let list listOption directory solutionName _ _ (settings : IDictionary<_, _>) =
         let sort =
-            match option with
+            match listOption with
             | A -> Seq.sortBy (fun (_, _, t) -> t)
             | D -> Seq.sortBy (fun (f, _, _) -> f)
             | O -> id
@@ -326,7 +348,7 @@ open Storage
 let main argv =
     printVersion ()
 
-    let directory = Environment.CurrentDirectory
+    let directory = DirectoryPath Environment.CurrentDirectory
 
     let argumentParser =
         Argu.ArgumentParser.Create<CliArgs>(helpTextMessage = "Help requested",
@@ -349,10 +371,10 @@ let main argv =
             |> fun action ->
                 directory
                 |> Solution.findSolutions
-                |> Seq.map (fun solutionName ->
-                    solutionName
+                |> Seq.map (fun solutionPath ->
+                    solutionPath
                     |> withSettings action branch
-                    |> Result.GetMessage (Path.GetFileNameWithoutExtension solutionName))
+                    |> Result.GetMessage (SolutionPath.SolutionName solutionPath))
                 |> String.concat "\n\n"
                 |> printfn "%s"
         | None -> printfn "Directory not under Git version control"
