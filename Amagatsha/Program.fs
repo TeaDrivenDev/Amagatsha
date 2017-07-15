@@ -28,59 +28,7 @@ module Prelude =
     let (|KeyValuePair|) (kvp : KeyValuePair<_, _>) = kvp.Key, kvp.Value
 
 [<AutoOpen>]
-module Infrastructure =
-    open Argu
-    open Fake.Git
-
-    let traceColored color (s:string) = 
-        let curColor = Console.ForegroundColor
-        if curColor <> color then Console.ForegroundColor <- color
-        use textWriter = 
-            match color with
-            | ConsoleColor.Red -> Console.Error
-            | ConsoleColor.Yellow -> Console.Out
-            | _ -> Console.Out
-
-        textWriter.WriteLine s
-        if curColor <> color then Console.ForegroundColor <- curColor
-
-    [<CliPrefix(CliPrefix.Dash)>]
-    type ListArgs  =
-        | A
-        | D
-        | O
-        interface IArgParserTemplate with
-            member s.Usage =
-                match s with
-                | A -> "List branches alphabetically"
-                | D -> "List branches by last write date"
-                | O -> "List branches in original order"
-
-    type AmagatshaExiter() =
-        interface IExiter with
-            member __.Name = "Amagatsha exiter"
-            member __.Exit (msg, code) =
-                if code = ErrorCode.HelpText then
-                    printfn "%s" msg ; exit 0
-                else traceColored ConsoleColor.Red msg ; exit 1
-
-    [<CliPrefix(CliPrefix.None)>]
-    type CliArgs =
-        | List of ParseResults<ListArgs>
-        | Save
-        | SavePrevious
-        | Restore
-        | Cleanup of daysToKeep:int
-        interface IArgParserTemplate with
-            member s.Usage =
-                match s with
-                | List _ -> "List branches for which saved document window data exists"
-                | Save -> "Backup the document window settings from the most recently updated .suo file"
-                | SavePrevious ->
-                    "Backup the document window settings from the most recently updated .suo file for the last previously checked out branch"
-                | Restore -> "Restore document window settings for the current branch to all supported .suo files"
-                | Cleanup _ -> "Remove saved document window settings older than the given number of days"
-
+module Domain =
     type BranchName = BranchName of string
     type Timestamp = Timestamp of string
     type Protection = Protected | NotProtected
@@ -122,17 +70,9 @@ module Infrastructure =
             | NoPreviousBranch ->
                 sprintf "No previously checked out branch found"
 
-    let getPreviousBranchName directory =
-        let branches =
-            "rev-parse --abbrev-ref @{-1}"
-            |> getGitResult directory
-            |> Seq.toList
-
-        branches
-        |> function
-            | [ "@{-1}" ] -> None
-            | [ branch ] -> branch |> BranchName |> Some
-            | _ -> None
+[<AutoOpen>]
+module Infrastructure =
+    open Argu
 
     let printVersion () =
         let productName, version =
@@ -144,6 +84,67 @@ module Infrastructure =
             fileVersionInfo.ProductName, assembly.GetName().Version
 
         printfn "%s v%i.%i.%i" productName version.Major version.Minor version.Build
+
+    let getPreviousBranchName directory =
+        let branches =
+            "rev-parse --abbrev-ref @{-1}"
+            |> Fake.Git.CommandHelper.getGitResult directory
+            |> Seq.toList
+
+        branches
+        |> function
+            | [ "@{-1}" ] -> None
+            | [ branch ] -> branch |> BranchName |> Some
+            | _ -> None
+
+    let traceColored color (s:string) = 
+        let curColor = Console.ForegroundColor
+        if curColor <> color then Console.ForegroundColor <- color
+        use textWriter = 
+            match color with
+            | ConsoleColor.Red -> Console.Error
+            | ConsoleColor.Yellow -> Console.Out
+            | _ -> Console.Out
+
+        textWriter.WriteLine s
+        if curColor <> color then Console.ForegroundColor <- curColor
+
+    type AmagatshaExiter() =
+        interface IExiter with
+            member __.Name = "Amagatsha exiter"
+            member __.Exit (msg, code) =
+                if code = ErrorCode.HelpText then
+                    printfn "%s" msg ; exit 0
+                else traceColored ConsoleColor.Red msg ; exit 1
+
+    [<CliPrefix(CliPrefix.Dash)>]
+    type ListArgs  =
+        | A
+        | D
+        | O
+        interface IArgParserTemplate with
+            member s.Usage =
+                match s with
+                | A -> "List branches alphabetically"
+                | D -> "List branches by last write date"
+                | O -> "List branches in original order"
+
+    [<CliPrefix(CliPrefix.None)>]
+    type CliArgs =
+        | List of ParseResults<ListArgs>
+        | Save
+        | SavePrevious
+        | Restore
+        | Cleanup of daysToKeep:int
+        interface IArgParserTemplate with
+            member s.Usage =
+                match s with
+                | List _ -> "List branches for which saved document window data exists"
+                | Save -> "Backup the document window settings from the most recently updated .suo file"
+                | SavePrevious ->
+                    "Backup the document window settings from the most recently updated .suo file for the last previously checked out branch"
+                | Restore -> "Restore document window settings for the current branch to all supported .suo files"
+                | Cleanup _ -> "Remove saved document window settings older than the given number of days"
 
 module Solution =
     let findSuos directory solutionName =
@@ -306,7 +307,7 @@ module Storage =
             let protection = match protection with Protected -> "Protected" | NotProtected -> ""
             sprintf "%s   %-12s %s" timestamp protection branch)
         |> Seq.toList
-        |> List
+        |> Result.List
 
     let withSettings action branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
