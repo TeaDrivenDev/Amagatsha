@@ -3,7 +3,7 @@ open System.Collections.Generic
 open System.IO
 
 [<Literal>]
-let StorageFileSuffix = "branchdocuments";
+let StorageFileSuffix = "branchdocuments"
 
 [<AutoOpen>]
 module Prelude =
@@ -87,7 +87,7 @@ module Domain =
 
     type Result = { ActionResult : ActionResult; WindowSettings : WindowSettings option }
 
-    type OperationForAllSolutions =
+    type OperationForSingleSolution =
         DirectoryPath -> BranchName -> (SuoPath * VsVersion) list -> WindowSettings -> Result
 
 [<AutoOpen>]
@@ -347,7 +347,7 @@ module Storage =
             WindowSettings = None
         }
 
-    let withSettings (action : OperationForAllSolutions) branch solutionPath =
+    let withSettings (action : OperationForSingleSolution) branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
 
         let suos = Solution.findSuos directory solutionName
