@@ -52,7 +52,7 @@ module Domain =
     type VsVersion = VsVersion of string
     type McdfKey = McdfKey of string
 
-    type Result =
+    type ActionResult =
         | List of string list
         | Saved of BranchName * VsVersion
         | Restored of VsVersion list
@@ -82,6 +82,11 @@ module Domain =
                 sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
             | NoPreviousBranch ->
                 sprintf "No previously checked out branch found"
+
+    type WindowSettings = IDictionary<BranchName, (Timestamp * Protection * DocumentData)>
+
+    type OperationForAllSolutions =
+        DirectoryPath -> SolutionName -> BranchName -> (SuoPath * VsVersion) list -> WindowSettings -> ActionResult
 
 [<AutoOpen>]
 module Infrastructure =
@@ -329,9 +334,9 @@ module Storage =
             let protection = match protection with Protected -> "Protected" | NotProtected -> ""
             sprintf "%s   %-12s %s" timestamp protection branch)
         |> Seq.toList
-        |> Result.List
+        |> ActionResult.List
 
-    let withSettings action branch solutionPath =
+    let withSettings (action : OperationForAllSolutions) branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
 
         let suos = Solution.findSuos directory solutionName
@@ -374,7 +379,7 @@ let main argv =
                 |> Seq.map (fun solutionPath ->
                     solutionPath
                     |> withSettings action branch
-                    |> Result.GetMessage (SolutionPath.SolutionName solutionPath))
+                    |> ActionResult.GetMessage (SolutionPath.SolutionName solutionPath))
                 |> String.concat "\n\n"
                 |> printfn "%s"
         | None -> printfn "Directory not under Git version control"
