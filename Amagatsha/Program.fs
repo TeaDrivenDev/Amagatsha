@@ -85,8 +85,10 @@ module Domain =
 
     type WindowSettings = IDictionary<BranchName, (Timestamp * Protection * DocumentData)>
 
+    type Result = { ActionResult : ActionResult; WindowSettings : WindowSettings option }
+
     type OperationForAllSolutions =
-        DirectoryPath -> SolutionName -> BranchName -> (SuoPath * VsVersion) list -> WindowSettings -> ActionResult
+        DirectoryPath -> BranchName -> (SuoPath * VsVersion) list -> WindowSettings -> Result
 
 [<AutoOpen>]
 module Infrastructure =
@@ -193,9 +195,9 @@ module Solution =
         SolutionName (Path.GetFileNameWithoutExtension solutionPath)
 
 module Mcdf =
-    let documentWindowPositionsMcdfKey = McdfKey "DocumentWindowPositions"
+    let private documentWindowPositionsMcdfKey = McdfKey "DocumentWindowPositions"
 
-    let readStream (SuoPath path) (McdfKey streamName) =
+    let private readStream (SuoPath path) (McdfKey streamName) =
         use file = new OpenMcdf.CompoundFile(path)
 
         let stream = file.RootStorage.GetStream streamName
@@ -208,7 +210,7 @@ module Mcdf =
     let readSolutionDocuments suoFilepath = 
         readStream suoFilepath documentWindowPositionsMcdfKey
 
-    let replaceStream (SuoPath path) (McdfKey streamName) (DocumentData data) =
+    let private replaceStream (SuoPath path) (McdfKey streamName) (DocumentData data) =
         use file = new OpenMcdf.CompoundFile(path,
                                              OpenMcdf.CFSUpdateMode.Update,
                                              OpenMcdf.CFSConfiguration.Default)
@@ -225,6 +227,9 @@ module Mcdf =
 
         File.Delete path
         File.Move(tempFilePath, path)
+
+    let writeSolutionDocuments suoFilePath documentData =
+        replaceStream suoFilePath documentWindowPositionsMcdfKey documentData
 
 module Storage = 
     let private getSolutionStorageFileName (SolutionName solutionName) =
@@ -266,7 +271,7 @@ module Storage =
         |> asSnd storageFileName
         |> File.WriteAllLines
 
-    let backupToStorage directory solutionName branch suos (settings : IDictionary<_, _>) =
+    let backupToStorage directory branch suos (settings : IDictionary<_, _>) =
         let suoFileName, version =
             suos
             |> List.map (fun (SuoPath file, version) -> FileInfo file, version)
@@ -283,31 +288,34 @@ module Storage =
 
         settings.[branch] <- (toTimestamp DateTime.Now, protection, documents)
 
-        writeWindowSettings directory solutionName settings
-        Saved (branch, version)
+        { ActionResult = Saved (branch, version); WindowSettings = Some settings }
 
-    let backupForPreviousBranch directory solutionName _ suos (settings : IDictionary<_, _>) =
+    let backupForPreviousBranch directory _ suos (settings : IDictionary<_, _>) =
         Solution.getPreviousBranchName directory
         |> Option.map (fun branch ->
-            backupToStorage directory solutionName branch suos settings)
-        |> Option.defaultValue NoPreviousBranch
+            backupToStorage directory branch suos settings)
+        |> Option.defaultValue { ActionResult = NoPreviousBranch; WindowSettings = None }
 
-    let restoreToSuo directory solutionName branch suos (settings : IDictionary<_, _>) =
-        match settings.TryGetValue branch with
-        | true, (_, _, data) ->
-            match suos with
-            | [] -> NoSuos
-            | _ ->
-                suos
-                |> List.map (fun (suoFileName, version) ->
-                    data
-                    |> Mcdf.replaceStream suoFileName Mcdf.documentWindowPositionsMcdfKey
-                    
-                    version)
-                |> Restored
-        | false, _-> NoDocumentData branch
+    let restoreToSuo directory branch suos (settings : IDictionary<_, _>) =
+        {
+            ActionResult =
+                match settings.TryGetValue branch with
+                | true, (_, _, data) ->
+                    match suos with
+                    | [] -> NoSuos
+                    | _ ->
+                        suos
+                        |> List.map (fun (suoFileName, version) ->
+                            data
+                            |> Mcdf.writeSolutionDocuments suoFileName
+                            
+                            version)
+                        |> Restored
+                | false, _-> NoDocumentData branch
+            WindowSettings = None
+        }
 
-    let cleanupStorage daysToKeep directory solutionName _ _ (settings : IDictionary<_, _>) =
+    let cleanupStorage daysToKeep directory _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
             settings
             |> Seq.filter (fun (KeyValuePair (BranchName key, (timestamp, protection, data))) ->
@@ -315,26 +323,29 @@ module Storage =
             |> Seq.toList
 
         oldBranches |> List.iter (settings.Remove >> ignore)
-        writeWindowSettings directory solutionName settings
 
-        Removed oldBranches.Length
+        { ActionResult = Removed oldBranches.Length; WindowSettings = Some settings }
 
-    let list listOption directory solutionName _ _ (settings : IDictionary<_, _>) =
+    let list listOption directory _ _ (settings : IDictionary<_, _>) =
         let sort =
             match listOption with
             | A -> Seq.sortBy (fun (_, _, t) -> t)
             | D -> Seq.sortBy (fun (f, _, _) -> f)
             | O -> id
 
-        settings
-        |> Seq.map (fun (KeyValuePair (branch, (timestamp, protection, _))) ->
-            timestamp, protection, branch)
-        |> sort
-        |> Seq.map (fun (Timestamp timestamp, protection, BranchName branch) ->
-            let protection = match protection with Protected -> "Protected" | NotProtected -> ""
-            sprintf "%s   %-12s %s" timestamp protection branch)
-        |> Seq.toList
-        |> ActionResult.List
+        {
+            ActionResult = 
+                settings
+                |> Seq.map (fun (KeyValuePair (branch, (timestamp, protection, _))) ->
+                    timestamp, protection, branch)
+                |> sort
+                |> Seq.map (fun (Timestamp timestamp, protection, BranchName branch) ->
+                    let protection = match protection with Protected -> "Protected" | NotProtected -> ""
+                    sprintf "%s   %-12s %s" timestamp protection branch)
+                |> Seq.toList
+                |> ActionResult.List
+            WindowSettings = None
+        }
 
     let withSettings (action : OperationForAllSolutions) branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
@@ -344,8 +355,14 @@ module Storage =
         match suos with
         | [] -> NoSuos
         | _ ->
-            readWindowSettings directory solutionName
-            |> action directory solutionName branch suos
+            let result = 
+                readWindowSettings directory solutionName
+                |> action directory branch suos
+
+            result.WindowSettings
+            |> Option.iter (writeWindowSettings directory solutionName)
+
+            result.ActionResult
 
 open Storage
 
