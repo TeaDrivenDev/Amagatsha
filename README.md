@@ -33,7 +33,7 @@ This is probably too cumbersome for most people to use but helps me in the short
 
 ### Limitations
 
-This currently only works when running `amagatsha.exe` in the directory that contains the `.sln` file.
+This currently only works when calling `amagatsha.exe` from the directory that contains the `.sln` file. (It does not have to be located there.)
 
 ### Building
 
