@@ -149,9 +149,19 @@ module Infrastructure =
         interface IArgParserTemplate with
             member s.Usage =
                 match s with
-                | A -> "List branches alphabetically"
+                | A -> "List branches alphabetically (this is the default)"
                 | D -> "List branches by last write date"
                 | O -> "List branches in original order"
+
+    [<CliPrefix(CliPrefix.Dash)>]
+    type CleanupArgs =
+        | B
+        | D of daysToKeep:int
+        interface IArgParserTemplate with
+            member s.Usage =
+                match s with
+                | B -> "Keep only data for branches that still exist locally (this is the default)"
+                | D _ -> "Keep only data for branches that have been updated in the given number of days"
 
     [<CliPrefix(CliPrefix.None)>]
     type CliArgs =
@@ -159,7 +169,7 @@ module Infrastructure =
         | Save
         | SavePrevious
         | Restore
-        | Cleanup of daysToKeep:int
+        | Cleanup of ParseResults<CleanupArgs>
         interface IArgParserTemplate with
             member s.Usage =
                 match s with
@@ -168,7 +178,7 @@ module Infrastructure =
                 | SavePrevious ->
                     "Backup the document window settings from the most recently updated .suo file for the last previously checked out branch"
                 | Restore -> "Restore document window settings for the current branch to all supported .suo files"
-                | Cleanup _ -> "Remove saved document window settings older than the given number of days"
+                | Cleanup _ -> "Remove obsolete branch data"
 
 module Solution =
     open Fake.Tools
@@ -443,12 +453,18 @@ module Storage =
             WindowSettings = None
         }
 
-    let cleanupStorage daysToKeep directory _ _ (settings : IDictionary<_, _>) =
+    let cleanupStorage args directory _ _ (settings : IDictionary<_, _>) =
+        let filter =
+            match args with
+            | B -> (fun _ -> true)
+            | D daysToKeep ->
+                (fun branchData ->
+                    branchData.Protection <> Protected
+                    && (DateTime.Now - branchData.LastWriteTime).Days > daysToKeep)
+
         let oldBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (BranchName key, branchData)) ->
-                branchData.Protection <> Protected
-                && (DateTime.Now - branchData.LastWriteTime).Days > daysToKeep)
+            |> Seq.filter (fun (KeyValuePair (BranchName key, branchData)) -> filter branchData)
             |> Seq.toList
 
         oldBranches |> List.iter (settings.Remove >> ignore)
@@ -461,7 +477,7 @@ module Storage =
         let sort =
             match listOption with
             | A -> Seq.sortBy (fun branchData -> branchData.BranchName)
-            | D -> Seq.sortBy (fun branchData -> branchData.LastWriteTime)
+            | ListArgs.D -> Seq.sortBy (fun branchData -> branchData.LastWriteTime)
             | O -> id
 
         {
@@ -520,7 +536,11 @@ let main argv =
             | Save -> backupToStorage
             | SavePrevious -> backupForPreviousBranch
             | Restore -> restoreToSuo
-            | Cleanup daysToKeep -> cleanupStorage daysToKeep
+            | Cleanup args ->
+                match args.GetAllResults() with
+                | head :: _ -> head
+                | [] -> B
+                |> cleanupStorage
             |> fun action ->
                 directory
                 |> Solution.findSolutions
