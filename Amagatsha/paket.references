@@ -2,3 +2,5 @@ OpenMcdf
 FAKE.Lib
 Argu
 FSharp.Core
+LiteDB
+LiteDB.FSharp
