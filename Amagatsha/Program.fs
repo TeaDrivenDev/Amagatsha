@@ -155,6 +155,8 @@ module Infrastructure =
                 | Cleanup _ -> "Remove saved document window settings older than the given number of days"
 
 module Solution =
+    open Fake.Tools
+
     let findSuos (DirectoryPath directory) (SolutionName solutionName) =
         [
             Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), VsVersion "2017"
@@ -175,13 +177,13 @@ module Solution =
             else Path.GetDirectoryName path
 
         try
-            directory |> Fake.Git.Information.getBranchName |> BranchName |> Some
+            directory |> Git.Information.getBranchName |> BranchName |> Some
         with :? ArgumentException -> None
 
     let getPreviousBranchName (DirectoryPath directory) =
         let branches =
             "rev-parse --abbrev-ref @{-1}"
-            |> Fake.Git.CommandHelper.getGitResult directory
+            |> Git.CommandHelper.getGitResult directory
             |> Seq.toList
 
         branches

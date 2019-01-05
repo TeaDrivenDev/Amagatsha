@@ -2,7 +2,7 @@ source https://www.nuget.org/api/v2
 framework: net461
 
 nuget argu
-nuget FAKE.Lib
+nuget Fake.Tools.Git
 nuget FsEye
 nuget FSharp.Core
 nuget OpenMcdf
