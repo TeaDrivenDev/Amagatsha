@@ -234,8 +234,29 @@ module Mcdf =
         replaceStream suoFilePath documentWindowPositionsMcdfKey documentData
 
 module Storage =
+    open System.Linq
+    open System.Reflection
+
     let private getSolutionStorageFileName (SolutionName solutionName) =
         suffixFilePath StorageFileSuffix solutionName
+
+    [<CLIMutable>]
+    type Metadata =
+        {
+            Id : int
+            Version : int
+            LastWriteTime : DateTime
+        }
+
+    [<CLIMutable>]
+    type BranchData =
+        {
+            Id : int
+            BranchName : string
+            LastWriteTime : DateTime
+            Protection : Protection
+            DocumentWindowPositions : byte []
+        }
 
     [<RequireQualifiedAccess>]
     module Legacy =
@@ -261,12 +282,15 @@ module Storage =
 
             key, (timestamp, protection, data |> Convert.FromBase64String |> DocumentData))
 
-        let writeDataFile storageFilePath (data : IDictionary<_, _>) =
-            data
-            |> Seq.map (fun (KeyValuePair (BranchName key, (timestamp, protection, DocumentData value))) ->
-                value |> Convert.ToBase64String |> sprintf "%s:%s:%s:%s" key (toTimestamp timestamp) (protection.ToString()))
-            |> asSnd storageFilePath
-            |> File.WriteAllLines
+        //let writeDataFile storageFilePath (data : IDictionary<_, _>) =
+        //    data
+        //    |> Seq.map (fun (KeyValuePair (BranchName key, (timestamp, protection, DocumentData value))) ->
+        //        value |> Convert.ToBase64String |> sprintf "%s:%s:%s:%s" key (toTimestamp timestamp) (protection.ToString()))
+        //    |> asSnd storageFilePath
+        //    |> File.WriteAllLines
+
+    [<Literal>]
+    let DatabaseVersion = 1
 
     let readWindowSettings (DirectoryPath directory) solutionName =
         let storageFilePath = Path.Combine(directory, getSolutionStorageFileName solutionName)
@@ -276,10 +300,57 @@ module Storage =
         else [| |]
         |> toDictionary
 
+    let writeDataFile (storageFilePath : string) (data : IDictionary<_, _>) =
+        use database =
+            let database = new LiteDB.LiteDatabase(storageFilePath, LiteDB.FSharp.FSharpBsonMapper())
+
+            try
+                database.CollectionExists("Metadata") |> ignore
+                database
+            with
+            | :? LiteDB.LiteException as ex ->
+                database.Dispose()
+
+                File.Delete storageFilePath
+
+                let database = new LiteDB.LiteDatabase(storageFilePath, LiteDB.FSharp.FSharpBsonMapper())
+                database
+
+        let metadataCollection = database.GetCollection<Metadata>()
+
+        let metadataId =
+            metadataCollection.FindAll()
+            |> Seq.tryHead
+            |> Option.map (fun metadata -> metadata.Id)
+
+        let metadata =
+            {
+                Id = metadataId |> Option.defaultValue 0
+                Version = DatabaseVersion
+                LastWriteTime = DateTime.Now
+            }
+
+        metadataCollection.Upsert metadata |> ignore
+
+        let branchDataCollection = database.GetCollection<BranchData>()
+        branchDataCollection.Delete(fun _ -> true) |> ignore
+
+        data
+        |> Seq.map (fun (KeyValuePair (BranchName branchName, (lastWriteTime, protection, DocumentData documentData))) ->
+            {
+                Id = 0
+                BranchName = branchName
+                LastWriteTime = lastWriteTime
+                Protection = protection
+                DocumentWindowPositions = documentData
+            })
+        |> branchDataCollection.InsertBulk
+        |> ignore
+
     let writeWindowSettings (DirectoryPath directory) solutionName (data : IDictionary<_, _>) =
         Path.Combine(directory, getSolutionStorageFileName solutionName)
         |> asFst data
-        ||> Legacy.writeDataFile
+        ||> writeDataFile
 
     let backupToStorage directory branch suos (settings : IDictionary<_, _>) =
         let suoFileName, version =
