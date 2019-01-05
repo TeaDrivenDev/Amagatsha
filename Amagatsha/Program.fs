@@ -37,7 +37,16 @@ module Domain =
                 match p with
                 | Protected -> "x"
                 | NotProtected -> "o"
-    type DocumentData = DocumentData of byte []
+
+    [<CLIMutable>]
+    type BranchData =
+        {
+            Id : int
+            BranchName : string
+            LastWriteTime : DateTime
+            Protection : Protection
+            DocumentWindowPositions : byte []
+        }
 
     type DirectoryPath = DirectoryPath of string
     type SolutionName = SolutionName of string
@@ -83,7 +92,7 @@ module Domain =
             | NoPreviousBranch ->
                 sprintf "No previously checked out branch found"
 
-    type WindowSettings = IDictionary<BranchName, (DateTime * Protection * DocumentData)>
+    type WindowSettings = IDictionary<BranchName, BranchData>
 
     type Result = { ActionResult : ActionResult; WindowSettings : WindowSettings option }
 
@@ -209,12 +218,12 @@ module Mcdf =
         let data = stream.GetData()
         file.Close()
 
-        DocumentData data
+        data
 
     let readSolutionDocuments suoFilepath =
         readStream suoFilepath documentWindowPositionsMcdfKey
 
-    let private replaceStream (SuoPath path) (McdfKey streamName) (DocumentData data) =
+    let private replaceStream (SuoPath path) (McdfKey streamName) data =
         use file = new CompoundFile(path, CFSUpdateMode.Update, CFSConfiguration.Default)
 
         let stream = file.RootStorage.GetStream streamName
@@ -234,8 +243,8 @@ module Mcdf =
         replaceStream suoFilePath documentWindowPositionsMcdfKey documentData
 
 module Storage =
-    open System.Linq
-    open System.Reflection
+    open LiteDB
+    open LiteDB.FSharp
 
     let private getSolutionStorageFileName (SolutionName solutionName) =
         suffixFilePath StorageFileSuffix solutionName
@@ -246,16 +255,6 @@ module Storage =
             Id : int
             Version : int
             LastWriteTime : DateTime
-        }
-
-    [<CLIMutable>]
-    type BranchData =
-        {
-            Id : int
-            BranchName : string
-            LastWriteTime : DateTime
-            Protection : Protection
-            DocumentWindowPositions : byte []
         }
 
     [<Literal>]
@@ -271,22 +270,31 @@ module Storage =
             |> Array.map (fun s ->
             let key, timestamp, protection, data =
                 match s.Split ':' with
-                | [| key; data |] -> BranchName key, DateTime.Now, NotProtected, data
+                | [| key; data |] -> key, DateTime.Now, NotProtected, data
                 | [| key; ParseTimestamp timestamp; data |] ->
-                    BranchName key, timestamp, NotProtected, data
+                    key, timestamp, NotProtected, data
                 | [| key; ParseTimestamp timestamp; protection; data |] ->
-                    BranchName key, timestamp, Protection.Parse protection, data
+                    key, timestamp, Protection.Parse protection, data
                 | _ -> failwith "Error in data"
 
-            key, (timestamp, protection, data |> Convert.FromBase64String |> DocumentData))
+            BranchName key,
+            {
+                Id = 0
+                BranchName = key
+                LastWriteTime = timestamp
+                Protection = protection
+                DocumentWindowPositions = Convert.FromBase64String data
+            })
 
     [<Literal>]
     let DatabaseVersion = 1
 
-    let readDatabase (database : LiteDB.LiteDatabase) =
+    let openDatabase (storageFilePath : string) =
+        new LiteDatabase(storageFilePath, FSharpBsonMapper())
+
+    let readDatabase (database : LiteDatabase) =
         database.GetCollection<BranchData>().FindAll()
-        |> Seq.map (fun branchData ->
-            (BranchName branchData.BranchName, (branchData.LastWriteTime, branchData.Protection, DocumentData branchData.DocumentWindowPositions)))
+        |> Seq.map (fun branchData -> BranchName branchData.BranchName, branchData)
         |> Seq.toArray
 
     let readWindowSettings (DirectoryPath directory) solutionName =
@@ -294,31 +302,30 @@ module Storage =
 
         if File.Exists storageFilePath
         then
-            use database = new LiteDB.LiteDatabase(storageFilePath, LiteDB.FSharp.FSharpBsonMapper())
+            use database = openDatabase storageFilePath
 
             try
                 database.CollectionExists("Metadata") |> ignore
                 readDatabase database
             with
-            | :? LiteDB.LiteException as ex ->
-                Legacy.readDataFile storageFilePath
+            | :? LiteException as ex -> Legacy.readDataFile storageFilePath
         else [| |]
         |> toDictionary
 
-    let writeDataFile (storageFilePath : string) (data : IDictionary<_, _>) =
+    let writeDataFile storageFilePath (data : IDictionary<_, BranchData>) =
         use database =
-            let database = new LiteDB.LiteDatabase(storageFilePath, LiteDB.FSharp.FSharpBsonMapper())
+            let database = openDatabase storageFilePath
 
             try
                 database.CollectionExists("Metadata") |> ignore
                 database
             with
-            | :? LiteDB.LiteException as ex ->
+            | :? LiteException as ex ->
                 database.Dispose()
 
                 File.Delete storageFilePath
 
-                let database = new LiteDB.LiteDatabase(storageFilePath, LiteDB.FSharp.FSharpBsonMapper())
+                let database = openDatabase storageFilePath
                 database
 
         let metadataCollection = database.GetCollection<Metadata>()
@@ -341,14 +348,7 @@ module Storage =
         branchDataCollection.Delete(fun _ -> true) |> ignore
 
         data
-        |> Seq.map (fun (KeyValuePair (BranchName branchName, (lastWriteTime, protection, DocumentData documentData))) ->
-            {
-                Id = 0
-                BranchName = branchName
-                LastWriteTime = lastWriteTime
-                Protection = protection
-                DocumentWindowPositions = documentData
-            })
+        |> Seq.map (fun (KeyValuePair (_, branchData)) -> { branchData with Id = 0 })
         |> branchDataCollection.InsertBulk
         |> ignore
 
@@ -357,7 +357,7 @@ module Storage =
         |> asFst data
         ||> writeDataFile
 
-    let backupToStorage directory branch suos (settings : IDictionary<_, _>) =
+    let backupToStorage directory (BranchName branchName as branch) suos (settings : IDictionary<_, _>) =
         let suoFileName, version =
             suos
             |> List.map (fun (SuoPath file, version) -> FileInfo file, version)
@@ -369,10 +369,17 @@ module Storage =
 
         let protection =
             match settings.TryGetValue branch with
-            | true, (_, protection, _) -> protection
+            | true, branchData -> branchData.Protection
             | false, _ -> NotProtected
 
-        settings.[branch] <- (DateTime.Now, protection, documents)
+        settings.[branch] <-
+            {
+                Id = 0
+                BranchName = branchName
+                LastWriteTime = DateTime.Now
+                Protection = protection
+                DocumentWindowPositions = documents
+            }
 
         { ActionResult = Saved (branch, version); WindowSettings = Some settings }
 
@@ -386,13 +393,13 @@ module Storage =
         {
             ActionResult =
                 match settings.TryGetValue branch with
-                | true, (_, _, data) ->
+                | true, branchData ->
                     match suos with
                     | [] -> NoSuos
                     | _ ->
                         suos
                         |> List.map (fun (suoFileName, version) ->
-                            data
+                            branchData.DocumentWindowPositions
                             |> Mcdf.writeSolutionDocuments suoFileName
 
                             version)
@@ -404,8 +411,9 @@ module Storage =
     let cleanupStorage daysToKeep directory _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (BranchName key, (timestamp : DateTime, protection, data))) ->
-                protection <> Protected && (DateTime.Now - timestamp).Days > daysToKeep)
+            |> Seq.filter (fun (KeyValuePair (BranchName key, branchData)) ->
+                branchData.Protection <> Protected
+                && (DateTime.Now - branchData.LastWriteTime).Days > daysToKeep)
             |> Seq.toList
 
         oldBranches |> List.iter (settings.Remove >> ignore)
@@ -417,19 +425,19 @@ module Storage =
 
         let sort =
             match listOption with
-            | A -> Seq.sortBy (fun (_, _, t) -> t)
-            | D -> Seq.sortBy (fun (f, _, _) -> f)
+            | A -> Seq.sortBy (fun branchData -> branchData.BranchName)
+            | D -> Seq.sortBy (fun branchData -> branchData.LastWriteTime)
             | O -> id
 
         {
             ActionResult =
                 settings
-                |> Seq.map (fun (KeyValuePair (branch, (timestamp, protection, _))) ->
-                    timestamp, protection, branch)
+                |> Seq.map (fun (KeyValuePair (_, branchData)) -> branchData)
                 |> sort
-                |> Seq.map (fun (timestamp, protection, BranchName branch) ->
-                    let protection = match protection with Protected -> "Protected" | NotProtected -> ""
-                    sprintf "%s   %-12s %s" (toTimestamp timestamp) protection branch)
+                |> Seq.map (fun branchData ->
+                    let protection =
+                        match branchData.Protection with Protected -> "Protected" | NotProtected -> ""
+                    sprintf "%s   %-12s %s" (toTimestamp branchData.LastWriteTime) protection branchData.BranchName)
                 |> Seq.toList
                 |> ActionResult.List
             WindowSettings = None
