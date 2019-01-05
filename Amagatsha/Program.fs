@@ -258,15 +258,13 @@ module Storage =
             DocumentWindowPositions : byte []
         }
 
+    [<Literal>]
+    let TimestampFormat = "yyyyMMdd"
+
     [<RequireQualifiedAccess>]
     module Legacy =
-        [<Literal>]
-        let TimestampFormat = "yyyyMMdd"
-
         let (|ParseTimestamp|) s =
             DateTime.ParseExact(s, TimestampFormat, Globalization.CultureInfo.InvariantCulture)
-
-        let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
 
         let readDataFile storageFilePath =
             File.ReadAllLines storageFilePath
@@ -282,21 +280,28 @@ module Storage =
 
             key, (timestamp, protection, data |> Convert.FromBase64String |> DocumentData))
 
-        //let writeDataFile storageFilePath (data : IDictionary<_, _>) =
-        //    data
-        //    |> Seq.map (fun (KeyValuePair (BranchName key, (timestamp, protection, DocumentData value))) ->
-        //        value |> Convert.ToBase64String |> sprintf "%s:%s:%s:%s" key (toTimestamp timestamp) (protection.ToString()))
-        //    |> asSnd storageFilePath
-        //    |> File.WriteAllLines
-
     [<Literal>]
     let DatabaseVersion = 1
+
+    let readDatabase (database : LiteDB.LiteDatabase) =
+        database.GetCollection<BranchData>().FindAll()
+        |> Seq.map (fun branchData ->
+            (BranchName branchData.BranchName, (branchData.LastWriteTime, branchData.Protection, DocumentData branchData.DocumentWindowPositions)))
+        |> Seq.toArray
 
     let readWindowSettings (DirectoryPath directory) solutionName =
         let storageFilePath = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         if File.Exists storageFilePath
-        then Legacy.readDataFile storageFilePath
+        then
+            use database = new LiteDB.LiteDatabase(storageFilePath, LiteDB.FSharp.FSharpBsonMapper())
+
+            try
+                database.CollectionExists("Metadata") |> ignore
+                readDatabase database
+            with
+            | :? LiteDB.LiteException as ex ->
+                Legacy.readDataFile storageFilePath
         else [| |]
         |> toDictionary
 
@@ -408,6 +413,8 @@ module Storage =
         { ActionResult = Removed oldBranches.Length; WindowSettings = Some settings }
 
     let list listOption directory _ _ (settings : IDictionary<_, _>) =
+        let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
+
         let sort =
             match listOption with
             | A -> Seq.sortBy (fun (_, _, t) -> t)
@@ -422,7 +429,7 @@ module Storage =
                 |> sort
                 |> Seq.map (fun (timestamp, protection, BranchName branch) ->
                     let protection = match protection with Protected -> "Protected" | NotProtected -> ""
-                    sprintf "%s   %-12s %s" (Legacy.toTimestamp timestamp) protection branch)
+                    sprintf "%s   %-12s %s" (toTimestamp timestamp) protection branch)
                 |> Seq.toList
                 |> ActionResult.List
             WindowSettings = None
