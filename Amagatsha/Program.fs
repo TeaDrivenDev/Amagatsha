@@ -18,6 +18,11 @@ module Prelude =
 
         dictionary
 
+    let tryGetValueOrDefault key defaultValue (dictionary : IDictionary<_, _>) =
+        match dictionary.TryGetValue key with
+        | true, value -> value
+        | false, _ -> defaultValue
+
     let prefixFileName prefix filePath =
         Path.Combine(Path.GetDirectoryName filePath, prefix + Path.GetFileName filePath)
 
@@ -46,6 +51,8 @@ module Domain =
             LastWriteTime : DateTime
             Protection : Protection
             DocumentWindowPositions : byte []
+            DebuggerBreakpoints : byte []
+            BookmarkState : byte []
         }
 
     type DirectoryPath = DirectoryPath of string
@@ -208,29 +215,46 @@ module Solution =
 module Mcdf =
     open OpenMcdf
 
-    let private documentWindowPositionsMcdfKey = McdfKey "DocumentWindowPositions"
+    type StreamKind =
+        | DocumentWindows
+        | DebuggerBreakpoints
+        | BookmarkState
+        with
+            member this.Key =
+                match this with
+                | DocumentWindows -> "DocumentWindowPositions"
+                | DebuggerBreakpoints -> "DebuggerBreakpoints"
+                | BookmarkState -> "BookmarkState"
 
-    let private readStream (SuoPath path) (McdfKey streamName) =
+    let private readStreams (SuoPath path) (streamKinds : StreamKind list) =
         use file = new CompoundFile(path)
 
-        let stream = file.RootStorage.GetStream streamName
+        let data =
+            streamKinds
+            |> List.map (fun streamKind ->
+                let stream = file.RootStorage.GetStream streamKind.Key
 
-        let data = stream.GetData()
+                streamKind, stream.GetData())
+
         file.Close()
 
         data
 
-    let readSolutionDocuments suoFilepath =
-        readStream suoFilepath documentWindowPositionsMcdfKey
+    let readSolutionData suoFilepath =
+        readStreams suoFilepath [ DocumentWindows; DebuggerBreakpoints; BookmarkState ]
 
-    let private replaceStream (SuoPath path) (McdfKey streamName) data =
+    let private replaceStreams (SuoPath path) streamData =
         use file = new CompoundFile(path, CFSUpdateMode.Update, CFSConfiguration.Default)
 
-        let stream = file.RootStorage.GetStream streamName
+        streamData
+        |> List.iter (fun (streamKind : StreamKind, data : byte []) ->
+            if data.Length > 0
+            then
+                let stream = file.RootStorage.GetStream streamKind.Key
 
-        data |> Array.length |> int64 |> stream.Resize
+                data |> Array.length |> int64 |> stream.Resize
 
-        stream.Write(data, 0L)
+                stream.Write(data, 0L))
 
         let tempFilePath = path |> prefixFileName "x"
         file.Save tempFilePath
@@ -239,8 +263,13 @@ module Mcdf =
         File.Delete path
         File.Move(tempFilePath, path)
 
-    let writeSolutionDocuments suoFilePath documentData =
-        replaceStream suoFilePath documentWindowPositionsMcdfKey documentData
+    let writeSolutionData suoPath branchData =
+        [
+            DocumentWindows, branchData.DocumentWindowPositions
+            DebuggerBreakpoints, branchData.DebuggerBreakpoints
+            BookmarkState, branchData.BookmarkState
+        ]
+        |> replaceStreams suoPath
 
 module Storage =
     open LiteDB
@@ -284,6 +313,8 @@ module Storage =
                 LastWriteTime = timestamp
                 Protection = protection
                 DocumentWindowPositions = Convert.FromBase64String data
+                DebuggerBreakpoints = [| |]
+                BookmarkState = [| |]
             })
 
     [<Literal>]
@@ -365,7 +396,7 @@ module Storage =
             |> List.head
             |> fun (fi, version) -> SuoPath fi.FullName, version
 
-        let documents = Mcdf.readSolutionDocuments suoFileName
+        let solutionData = Mcdf.readSolutionData suoFileName |> dict
 
         let protection =
             match settings.TryGetValue branch with
@@ -378,7 +409,12 @@ module Storage =
                 BranchName = branchName
                 LastWriteTime = DateTime.Now
                 Protection = protection
-                DocumentWindowPositions = documents
+                DocumentWindowPositions =
+                    solutionData |> tryGetValueOrDefault Mcdf.DocumentWindows [| |]
+                DebuggerBreakpoints =
+                    solutionData |> tryGetValueOrDefault Mcdf.DebuggerBreakpoints [| |]
+                BookmarkState =
+                    solutionData |> tryGetValueOrDefault Mcdf.BookmarkState [| |]
             }
 
         { ActionResult = Saved (branch, version); WindowSettings = Some settings }
@@ -399,8 +435,7 @@ module Storage =
                     | _ ->
                         suos
                         |> List.map (fun (suoFileName, version) ->
-                            branchData.DocumentWindowPositions
-                            |> Mcdf.writeSolutionDocuments suoFileName
+                            Mcdf.writeSolutionData suoFileName branchData
 
                             version)
                         |> Restored
