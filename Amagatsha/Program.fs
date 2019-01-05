@@ -7,6 +7,7 @@ let StorageFileSuffix = "branchdocuments"
 
 [<AutoOpen>]
 module Prelude =
+    let asFst second first = first, second
     let asSnd first second = first, second
 
     let toDictionary data =
@@ -27,7 +28,6 @@ module Prelude =
 [<AutoOpen>]
 module Domain =
     type BranchName = BranchName of string
-    type Timestamp = Timestamp of string
     type Protection = Protected | NotProtected
         with static member Parse s =
                 match s with
@@ -83,7 +83,7 @@ module Domain =
             | NoPreviousBranch ->
                 sprintf "No previously checked out branch found"
 
-    type WindowSettings = IDictionary<BranchName, (Timestamp * Protection * DocumentData)>
+    type WindowSettings = IDictionary<BranchName, (DateTime * Protection * DocumentData)>
 
     type Result = { ActionResult : ActionResult; WindowSettings : WindowSettings option }
 
@@ -237,41 +237,49 @@ module Storage =
     let private getSolutionStorageFileName (SolutionName solutionName) =
         suffixFilePath StorageFileSuffix solutionName
 
-    [<Literal>]
-    let TimestampFormat = "yyyyMMdd"
+    [<RequireQualifiedAccess>]
+    module Legacy =
+        [<Literal>]
+        let TimestampFormat = "yyyyMMdd"
 
-    let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat |> Timestamp
+        let (|ParseTimestamp|) s =
+            DateTime.ParseExact(s, TimestampFormat, Globalization.CultureInfo.InvariantCulture)
 
-    let parseTimestamp (Timestamp s) =
-        DateTime.ParseExact(s, TimestampFormat, Globalization.CultureInfo.InvariantCulture)
+        let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
+
+        let readDataFile storageFilePath =
+            File.ReadAllLines storageFilePath
+            |> Array.map (fun s ->
+            let key, timestamp, protection, data =
+                match s.Split ':' with
+                | [| key; data |] -> BranchName key, DateTime.Now, NotProtected, data
+                | [| key; ParseTimestamp timestamp; data |] ->
+                    BranchName key, timestamp, NotProtected, data
+                | [| key; ParseTimestamp timestamp; protection; data |] ->
+                    BranchName key, timestamp, Protection.Parse protection, data
+                | _ -> failwith "Error in data"
+
+            key, (timestamp, protection, data |> Convert.FromBase64String |> DocumentData))
+
+        let writeDataFile storageFilePath (data : IDictionary<_, _>) =
+            data
+            |> Seq.map (fun (KeyValuePair (BranchName key, (timestamp, protection, DocumentData value))) ->
+                value |> Convert.ToBase64String |> sprintf "%s:%s:%s:%s" key (toTimestamp timestamp) (protection.ToString()))
+            |> asSnd storageFilePath
+            |> File.WriteAllLines
 
     let readWindowSettings (DirectoryPath directory) solutionName =
         let storageFilePath = Path.Combine(directory, getSolutionStorageFileName solutionName)
 
         if File.Exists storageFilePath
-        then File.ReadAllLines storageFilePath
-             |> Array.map (fun s ->
-                let key, timestamp, protection, data =
-                    match s.Split ':' with
-                    | [| key; data |] -> BranchName key, toTimestamp DateTime.Now, NotProtected, data
-                    | [| key; timestamp; data |] ->
-                        BranchName key, Timestamp timestamp, NotProtected, data
-                    | [| key; timestamp; protection; data |] ->
-                        BranchName key, Timestamp timestamp, Protection.Parse protection, data
-                    | _ -> failwith "Error in data"
-
-                key, (timestamp, protection, data |> Convert.FromBase64String |> DocumentData))
+        then Legacy.readDataFile storageFilePath
         else [| |]
         |> toDictionary
 
     let writeWindowSettings (DirectoryPath directory) solutionName (data : IDictionary<_, _>) =
-        let storageFileName = Path.Combine(directory, getSolutionStorageFileName solutionName)
-
-        data
-        |> Seq.map (fun (KeyValuePair (BranchName key, (Timestamp timestamp, protection, DocumentData value))) ->
-            value |> Convert.ToBase64String |> sprintf "%s:%s:%s:%s" key timestamp (protection.ToString()))
-        |> asSnd storageFileName
-        |> File.WriteAllLines
+        Path.Combine(directory, getSolutionStorageFileName solutionName)
+        |> asFst data
+        ||> Legacy.writeDataFile
 
     let backupToStorage directory branch suos (settings : IDictionary<_, _>) =
         let suoFileName, version =
@@ -288,7 +296,7 @@ module Storage =
             | true, (_, protection, _) -> protection
             | false, _ -> NotProtected
 
-        settings.[branch] <- (toTimestamp DateTime.Now, protection, documents)
+        settings.[branch] <- (DateTime.Now, protection, documents)
 
         { ActionResult = Saved (branch, version); WindowSettings = Some settings }
 
@@ -320,8 +328,8 @@ module Storage =
     let cleanupStorage daysToKeep directory _ _ (settings : IDictionary<_, _>) =
         let oldBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (BranchName key, (timestamp, protection, data))) ->
-                protection <> Protected && (DateTime.Now - parseTimestamp timestamp).Days > daysToKeep)
+            |> Seq.filter (fun (KeyValuePair (BranchName key, (timestamp : DateTime, protection, data))) ->
+                protection <> Protected && (DateTime.Now - timestamp).Days > daysToKeep)
             |> Seq.toList
 
         oldBranches |> List.iter (settings.Remove >> ignore)
@@ -341,9 +349,9 @@ module Storage =
                 |> Seq.map (fun (KeyValuePair (branch, (timestamp, protection, _))) ->
                     timestamp, protection, branch)
                 |> sort
-                |> Seq.map (fun (Timestamp timestamp, protection, BranchName branch) ->
+                |> Seq.map (fun (timestamp, protection, BranchName branch) ->
                     let protection = match protection with Protected -> "Protected" | NotProtected -> ""
-                    sprintf "%s   %-12s %s" timestamp protection branch)
+                    sprintf "%s   %-12s %s" (Legacy.toTimestamp timestamp) protection branch)
                 |> Seq.toList
                 |> ActionResult.List
             WindowSettings = None
