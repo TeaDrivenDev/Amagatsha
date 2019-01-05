@@ -1,11 +1,16 @@
 #### tl;dr
 
-This is a small command line utility for saving and restoring Visual Studio document window layouts across different Git branches.
+This is a small command line utility for saving and restoring Visual Studio
+* document window layouts,
+* debugger breakpoints and
+* bookmarks
+
+across different Git branches.
 
 
 ### The Problem
 
-Visual Studio saves information on open documents (along with other settings) in a `.suo` file per solution. As those settings are generally user-specific, it makes no sense to put the `.suo` in version control. This means that the open documents settings always stay the same when going back and forth between branches, leading to a (for me) annoying behavior:
+Visual Studio saves all its user-specific settings for a solution in a `.suo` file. Due to that user-specific nature, it makes no sense to put the `.suo` file in version control. This means that things like open documents, breakpoints and bookmarks always stay the same when going back and forth between branches, leading to a (for me) annoying behavior:
 
 - You work on a new feature in branch `A`. You have added new code files here and arranged your code tabs and windows in a way that is suitable for what you need to do.
 - An issue pops up that needs to be fixed immediately. You checkout branch `B` from the main branch and get to work. Visual Studio tries to apply the previous document window layout, but the new files you added in branch `A` do not exist in branch `B`, so those tabs and windows can't be opened. The files that you had open which exist in this branch as well will be opened, but chances are you don't need those, so you'll either close or leave them, and open other files that are involved in the fix you need to make.
@@ -15,18 +20,19 @@ Visual Studio saves information on open documents (along with other settings) in
 
 This is a small command line tool that can do one of two things:
 
-- Extract the document window settings from a `.suo` file and remember them for the current Git branch
-- Overwrite the document window settings in the `.suo` files for supported Visual Studio versions with those previously stored for the current branch
+- Extract the document window layout, breakpoints and bookmarks from a `.suo` file and remember them for the current Git branch
+- Overwrite the document window layout, breakpoints and bookmarks in the `.suo` files for supported Visual Studio versions with those previously stored for the current branch
 
 If `amagatsha.exe` is in `$PATH`, the workflow is as follows:
 
-- If you need to switch branches, close the solution; this is necessary to make Visual Studio save the current window layout to the `.suo` file.
-- Run `amagatsha save` in the repository's root directory. This will look for any `.sln` files in the directory, try to find the respective `.suo` files and add or update the entry with the current branch's name in `<solutionname>.branchdocuments`. If `.suo` files for more than one supported Visual Studio version (currently 2015 and 2017) are found, document window settings are backed up from the most recently changed one.
+- If you need to switch branches, close the solution; this is necessary to make Visual Studio save the current solution settings to the `.suo` file.
+- Run `amagatsha save` in the repository's root directory. This will look for any `.sln` files in the directory, try to find the respective `.suo` files and add or update the entry with the current branch's name in `<solutionname>.branchdocuments`. If `.suo` files for more than one supported Visual Studio version (currently 2015 and 2017) are found, settings are backed up from the most recently changed one.
 - Checkout the other branch.
-- Run `amagatsha restore`. This will look for an entry with the current branch name in the `.branchdocuments` file, and if found, will replace the document settings in the `.suo` file with that data. If `.suo` files for more than one supported Visual Studio version (currently 2015 and 2017) are found, document window settings are restored into all of them.
+- Run `amagatsha restore`. This will look for an entry with the current branch name in the `.branchdocuments` file, and if found, will replace the solution settings in the `.suo` file with that data. If `.suo` files for more than one supported Visual Studio version (currently 2015 and 2017) are found, settings are restored into all of them.
 - Reopen the solution.
 
-- `amagatsha cleanup <n>` removes document settings for branches that are older than `<n>` days.
+- `amagatsha cleanup -b` removes solution settings for branches that do not exist in the local repository (the `-b` parameter is optional)
+- `amagatsha cleanup -d <n>` removes solution settings for branches that have not been updated in `<n>` days.
 
 This is probably too cumbersome for most people to use but helps me in the short term. A much nicer solution would be a Visual Studio extension that takes care of this, but that would obviously be a lot more effort, and I don't know how feasible that really would be.
 
