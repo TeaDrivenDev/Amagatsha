@@ -105,10 +105,10 @@ module Infrastructure =
 
         printfn "%s v%i.%i.%i" productName version.Major version.Minor version.Build
 
-    let traceColored color (s : string) = 
+    let traceColored color (s : string) =
         let curColor = Console.ForegroundColor
         if curColor <> color then Console.ForegroundColor <- color
-        use textWriter = 
+        use textWriter =
             match color with
             | ConsoleColor.Red -> Console.Error
             | ConsoleColor.Yellow -> Console.Out
@@ -195,10 +195,12 @@ module Solution =
         SolutionName (Path.GetFileNameWithoutExtension solutionPath)
 
 module Mcdf =
+    open OpenMcdf
+
     let private documentWindowPositionsMcdfKey = McdfKey "DocumentWindowPositions"
 
     let private readStream (SuoPath path) (McdfKey streamName) =
-        use file = new OpenMcdf.CompoundFile(path)
+        use file = new CompoundFile(path)
 
         let stream = file.RootStorage.GetStream streamName
 
@@ -207,13 +209,11 @@ module Mcdf =
 
         DocumentData data
 
-    let readSolutionDocuments suoFilepath = 
+    let readSolutionDocuments suoFilepath =
         readStream suoFilepath documentWindowPositionsMcdfKey
 
     let private replaceStream (SuoPath path) (McdfKey streamName) (DocumentData data) =
-        use file = new OpenMcdf.CompoundFile(path,
-                                             OpenMcdf.CFSUpdateMode.Update,
-                                             OpenMcdf.CFSConfiguration.Default)
+        use file = new CompoundFile(path, CFSUpdateMode.Update, CFSConfiguration.Default)
 
         let stream = file.RootStorage.GetStream streamName
 
@@ -231,7 +231,7 @@ module Mcdf =
     let writeSolutionDocuments suoFilePath documentData =
         replaceStream suoFilePath documentWindowPositionsMcdfKey documentData
 
-module Storage = 
+module Storage =
     let private getSolutionStorageFileName (SolutionName solutionName) =
         suffixFilePath StorageFileSuffix solutionName
 
@@ -308,7 +308,7 @@ module Storage =
                         |> List.map (fun (suoFileName, version) ->
                             data
                             |> Mcdf.writeSolutionDocuments suoFileName
-                            
+
                             version)
                         |> Restored
                 | false, _-> NoDocumentData branch
@@ -334,7 +334,7 @@ module Storage =
             | O -> id
 
         {
-            ActionResult = 
+            ActionResult =
                 settings
                 |> Seq.map (fun (KeyValuePair (branch, (timestamp, protection, _))) ->
                     timestamp, protection, branch)
@@ -355,7 +355,7 @@ module Storage =
         match suos with
         | [] -> NoSuos
         | _ ->
-            let result = 
+            let result =
                 readWindowSettings directory solutionName
                 |> action directory branch suos
 
