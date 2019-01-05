@@ -453,23 +453,25 @@ module Storage =
             WindowSettings = None
         }
 
-    let cleanupStorage args directory _ _ (settings : IDictionary<_, _>) =
-        let filter =
+    let cleanupStorage args (DirectoryPath directory) _ _ (settings : IDictionary<_, _>) =
+        let obsolete =
             match args with
-            | B -> (fun _ -> true)
-            | D daysToKeep ->
-                (fun branchData ->
-                    branchData.Protection <> Protected
-                    && (DateTime.Now - branchData.LastWriteTime).Days > daysToKeep)
+            | B ->
+                let localBranches = Fake.Tools.Git.Branches.getLocalBranches directory
 
-        let oldBranches =
+                (fun branchData -> localBranches |> List.contains branchData.BranchName |> not)
+            | D daysToKeep ->
+                (fun branchData -> (DateTime.Now - branchData.LastWriteTime).Days > daysToKeep)
+
+        let obsoleteBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (BranchName key, branchData)) -> filter branchData)
+            |> Seq.filter (fun (KeyValuePair (_, branchData)) ->
+                branchData.Protection <> Protected && obsolete branchData)
             |> Seq.toList
 
-        oldBranches |> List.iter (settings.Remove >> ignore)
+        obsoleteBranches |> List.iter (settings.Remove >> ignore)
 
-        { ActionResult = Removed oldBranches.Length; WindowSettings = Some settings }
+        { ActionResult = Removed obsoleteBranches.Length; WindowSettings = Some settings }
 
     let list listOption directory _ _ (settings : IDictionary<_, _>) =
         let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
