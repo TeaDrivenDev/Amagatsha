@@ -17,7 +17,7 @@ let gitRaw = environVarOrDefault "gitRaw" ("https://raw.github.com/" + gitOwner)
 
 let outputDirectory = "bin"
 
-let release = File.ReadAllLines "RELEASE_NOTES.md" |> ReleaseNotesHelper.parseReleaseNotes 
+let release = File.ReadAllLines "RELEASE_NOTES.md" |> ReleaseNotesHelper.parseReleaseNotes
 
 Target "AssemblyInfo" (fun _ ->
     let fileName = !! "**/AssemblyInfo.fs" |> Seq.head
@@ -76,15 +76,14 @@ Target "ReleaseGitHub" (fun _ ->
 
     Branches.tag "" release.NugetVersion
     Branches.pushTag "" remote release.NugetVersion
-    
+
     // release on github
     createClient user pw
-    |> createDraft gitOwner gitName release.NugetVersion (release.SemVer.PreRelease <> None) release.Notes 
+    |> createDraft gitOwner gitName release.NugetVersion (release.SemVer.PreRelease <> None) release.Notes
     |> uploadFile "./bin/Amagatsha.zip"
     |> releaseDraft
     |> Async.RunSynchronously
 )
-
 
 "AssemblyInfo"
 ==> "Clean"
@@ -93,3 +92,5 @@ Target "ReleaseGitHub" (fun _ ->
 ==> "ReleaseGitHub"
 
 RunTargetOrDefault "Build"
+
+printfn "\nFinished %s\n" (System.DateTime.Now.ToString "HH:mm:ss")
