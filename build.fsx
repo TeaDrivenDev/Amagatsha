@@ -1,87 +1,99 @@
-System.IO.Directory.SetCurrentDirectory __SOURCE_DIRECTORY__
+﻿System.IO.Directory.SetCurrentDirectory __SOURCE_DIRECTORY__
 
-#r @"packages/build/FAKE/tools/FakeLib.dll"
+#r "paket:
+nuget Fake.Api.GitHub
+nuget Fake.Core.ReleaseNotes
+nuget Fake.Core.Target
+nuget Fake.Core.UserInput
+nuget Fake.DotNet.AssemblyInfoFile
+nuget Fake.DotNet.MSBuild
+nuget Fake.IO.FileSystem
+nuget Fake.IO.Zip
+nuget Fake.Tools.Git
+nuget Octokit
+//"
 
-open System
-open System.IO
+#load ".fake/build.fsx/intellisense.fsx"
 
-open Fake
-open Fake.Git
+open Fake.Api
+open Fake.Core
+open Fake.Core.TargetOperators
+open Fake.DotNet
+open Fake.IO
+open Fake.IO.Globbing
+open Fake.IO.Globbing.Operators
+open Fake.Tools
 
 let solutionFile  = "Amagatsha.sln"
 
 let gitOwner = "TeaDrivenDev"
 let gitHome = "https://github.com/" + gitOwner
 let gitName = "Amagatsha"
-let gitRaw = environVarOrDefault "gitRaw" ("https://raw.github.com/" + gitOwner)
+let gitRaw = Environment.environVarOrDefault "gitRaw" ("https://raw.github.com/" + gitOwner)
 
 let outputDirectory = "bin"
 
-let release = File.ReadAllLines "RELEASE_NOTES.md" |> ReleaseNotesHelper.parseReleaseNotes
+let release = ReleaseNotes.load "RELEASE_NOTES.md"
 
-Target "AssemblyInfo" (fun _ ->
+Target.create "AssemblyInfo" (fun _ ->
     let fileName = !! "**/AssemblyInfo.fs" |> Seq.head
 
-    ReplaceAssemblyInfoVersions (fun p ->
-        { p with
-            OutputFileName = fileName
-            AssemblyVersion = release.AssemblyVersion
-            AssemblyFileVersion = release.AssemblyVersion + ".*"
-            AssemblyInformationalVersion =
-                let version = System.Version release.AssemblyVersion
-
-                sprintf "%i.%i" version.Major version.Minor
-        })
+    [
+        AssemblyInfo.Title "Amagatsha"
+        AssemblyInfo.Product "Amagatsha"
+        AssemblyInfo.Copyright "Copyright © TeaDrivenDev 2019"
+        AssemblyInfo.ComVisible false
+        AssemblyInfo.Version release.AssemblyVersion
+    ]
+    |> AssemblyInfoFile.createFSharp fileName
 )
 
-Target "Clean" (fun _ -> CleanDirs [ outputDirectory ])
+Target.create "Clean" (fun _ -> Shell.cleanDirs [ outputDirectory ])
 
-Target "Build" (fun _ ->
+Target.create "Build" (fun _ ->
     !! solutionFile
-    |> MSBuildRelease "" "Rebuild"
+    |> MSBuild.runRelease id "" "Rebuild"
     |> ignore)
 
-Target "Pack" (fun _ ->
+Target.create "Pack" (fun _ ->
     let filesToPack =
         {
             BaseDirectory = outputDirectory
             Includes = [ "*.exe"; "*.dll"; "*.config" ]
             Excludes = []
         }
+        :> IGlobbingPattern
 
-    ZipOfIncludes (outputDirectory + "/Amagatsha.zip") ["", filesToPack ]
+    Zip.createZipOfIncludes (outputDirectory + "/Amagatsha.zip") "" 5 ["", filesToPack ]
 )
 
-#load "paket-files/build/fsharp/FAKE/modules/Octokit/Octokit.fsx"
-open Octokit
-
-Target "ReleaseGitHub" (fun _ ->
+Target.create "ReleaseGitHub" (fun _ ->
     let user =
-        match getBuildParam "github-user" with
-        | s when not (String.IsNullOrWhiteSpace s) -> s
-        | _ -> getUserInput "Username: "
+        match Environment.environVarOrNone "github-user" with
+        | Some s -> s
+        | _ -> UserInput.getUserInput "Username: "
     let pw =
-        match getBuildParam "github-pw" with
-        | s when not (String.IsNullOrWhiteSpace s) -> s
-        | _ -> getUserPassword "Password: "
+        match Environment.environVarOrNone "github-pw" with
+        | Some s -> s
+        | _ -> UserInput.getUserPassword "Password: "
     let remote =
         Git.CommandHelper.getGitResult "" "remote -v"
         |> Seq.filter (fun (s: string) -> s.EndsWith("(push)"))
         |> Seq.tryFind (fun (s: string) -> s.Contains(gitOwner + "/" + gitName))
         |> function None -> gitHome + "/" + gitName | Some (s: string) -> s.Split().[0]
 
-    StageAll ""
-    Git.Commit.Commit "" (sprintf "Release version %s" release.NugetVersion)
-    Branches.pushBranch "" remote (Information.getBranchName "")
+    Git.Staging.stageAll ""
+    Git.Commit.exec "" (sprintf "Release version %s" release.NugetVersion)
+    Git.Branches.pushBranch "" remote (Git.Information.getBranchName "")
 
-    Branches.tag "" release.NugetVersion
-    Branches.pushTag "" remote release.NugetVersion
+    Git.Branches.tag "" release.NugetVersion
+    Git.Branches.pushTag "" remote release.NugetVersion
 
-    // release on github
-    createClient user pw
-    |> createDraft gitOwner gitName release.NugetVersion (release.SemVer.PreRelease <> None) release.Notes
-    |> uploadFile "./bin/Amagatsha.zip"
-    |> releaseDraft
+    // release on GitHub
+    GitHub.createClient user pw
+    |> GitHub.draftNewRelease gitOwner gitName release.NugetVersion (release.SemVer.PreRelease <> None) release.Notes
+    |> GitHub.uploadFile "./bin/Amagatsha.zip"
+    |> GitHub.publishDraft
     |> Async.RunSynchronously
 )
 
@@ -91,6 +103,6 @@ Target "ReleaseGitHub" (fun _ ->
 ==> "Pack"
 ==> "ReleaseGitHub"
 
-RunTargetOrDefault "Build"
+Target.runOrDefault "Build"
 
 printfn "\nFinished %s\n" (System.DateTime.Now.ToString "HH:mm:ss")
