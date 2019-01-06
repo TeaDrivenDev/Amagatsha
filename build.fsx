@@ -4,7 +4,6 @@
 nuget Fake.Api.GitHub
 nuget Fake.Core.ReleaseNotes
 nuget Fake.Core.Target
-nuget Fake.Core.UserInput
 nuget Fake.DotNet.AssemblyInfoFile
 nuget Fake.DotNet.MSBuild
 nuget Fake.IO.FileSystem
@@ -68,14 +67,6 @@ Target.create "Pack" (fun _ ->
 )
 
 Target.create "ReleaseGitHub" (fun _ ->
-    let user =
-        match Environment.environVarOrNone "github-user" with
-        | Some s -> s
-        | _ -> UserInput.getUserInput "Username: "
-    let pw =
-        match Environment.environVarOrNone "github-pw" with
-        | Some s -> s
-        | _ -> UserInput.getUserPassword "Password: "
     let remote =
         Git.CommandHelper.getGitResult "" "remote -v"
         |> Seq.filter (fun (s: string) -> s.EndsWith("(push)"))
