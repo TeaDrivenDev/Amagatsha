@@ -90,7 +90,7 @@ Target.create "ReleaseGitHub" (fun _ ->
     Git.Branches.pushTag "" remote release.NugetVersion
 
     // release on GitHub
-    GitHub.createClient user pw
+    GitHub.createClientWithToken (Environment.environVarOrFail "githubtoken")
     |> GitHub.draftNewRelease gitOwner gitName release.NugetVersion (release.SemVer.PreRelease <> None) release.Notes
     |> GitHub.uploadFile "./bin/Amagatsha.zip"
     |> GitHub.publishDraft
