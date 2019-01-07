@@ -6,6 +6,7 @@
     <DebugType>portable</DebugType>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <OutputPath>..\bin</OutputPath>
