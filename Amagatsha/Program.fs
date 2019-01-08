@@ -35,15 +35,6 @@ module Prelude =
 [<AutoOpen>]
 module Domain =
     type BranchName = BranchName of string
-    type Protection = Protected | NotProtected
-        with static member Parse s =
-                match s with
-                | "x" -> Protected
-                | _ -> NotProtected
-             override p.ToString() =
-                match p with
-                | Protected -> "x"
-                | NotProtected -> "o"
 
     [<CLIMutable>]
     type BranchData =
@@ -51,7 +42,6 @@ module Domain =
             Id : int
             BranchName : string
             LastWriteTime : DateTime
-            Protection : Protection
             DocumentWindowPositions : byte []
             DebuggerBreakpoints : byte []
             BookmarkState : byte []
@@ -309,13 +299,13 @@ module Storage =
         let readDataFile storageFilePath =
             File.ReadAllLines storageFilePath
             |> Array.map (fun s ->
-            let key, timestamp, protection, data =
+            let key, timestamp, data =
                 match s.Split ':' with
-                | [| key; data |] -> key, DateTime.Now, NotProtected, data
+                | [| key; data |] -> key, DateTime.Now, data
                 | [| key; ParseTimestamp timestamp; data |] ->
-                    key, timestamp, NotProtected, data
+                    key, timestamp, data
                 | [| key; ParseTimestamp timestamp; protection; data |] ->
-                    key, timestamp, Protection.Parse protection, data
+                    key, timestamp, data
                 | _ -> failwith "Error in data"
 
             BranchName key,
@@ -323,7 +313,6 @@ module Storage =
                 Id = 0
                 BranchName = key
                 LastWriteTime = timestamp
-                Protection = protection
                 DocumentWindowPositions = Convert.FromBase64String data
                 DebuggerBreakpoints = [| |]
                 BookmarkState = [| |]
@@ -410,17 +399,11 @@ module Storage =
 
         let solutionData = Mcdf.readSolutionData suoFileName |> dict
 
-        let protection =
-            match settings.TryGetValue branch with
-            | true, branchData -> branchData.Protection
-            | false, _ -> NotProtected
-
         settings.[branch] <-
             {
                 Id = 0
                 BranchName = branchName
                 LastWriteTime = DateTime.Now
-                Protection = protection
                 DocumentWindowPositions =
                     solutionData |> tryGetValueOrDefault Mcdf.DocumentWindows [| |]
                 DebuggerBreakpoints =
@@ -467,8 +450,7 @@ module Storage =
 
         let obsoleteBranches =
             settings
-            |> Seq.filter (fun (KeyValuePair (_, branchData)) ->
-                branchData.Protection <> Protected && obsolete branchData)
+            |> Seq.filter (fun (KeyValuePair (_, branchData)) -> obsolete branchData)
             |> Seq.toList
 
         obsoleteBranches |> List.iter (settings.Remove >> ignore)
@@ -490,9 +472,7 @@ module Storage =
                 |> Seq.map (fun (KeyValuePair (_, branchData)) -> branchData)
                 |> sort
                 |> Seq.map (fun branchData ->
-                    let protection =
-                        match branchData.Protection with Protected -> "Protected" | NotProtected -> ""
-                    sprintf "%s   %-12s %s" (toTimestamp branchData.LastWriteTime) protection branchData.BranchName)
+                    sprintf "%s\t%s" (toTimestamp branchData.LastWriteTime) branchData.BranchName)
                 |> Seq.toList
                 |> ActionResult.List
             WindowSettings = None
