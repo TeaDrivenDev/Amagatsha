@@ -72,24 +72,27 @@ module Domain =
         static member GetMessage (SolutionName solutionName) result =
             match result with
             | List items ->
-                sprintf "Saved document window data for solution '%s' exists for the following branches:" solutionName
-                :: items
-                |> String.concat Environment.NewLine
+                match items with
+                | [] -> sprintf "No saved Visual Studio settings found for solution '%s'." solutionName
+                | _ ->
+                    sprintf "Saved Visual Studio settings for solution '%s' exist for the following branches:" solutionName
+                    :: items
+                    |> String.concat Environment.NewLine
             | Saved (BranchName branch, VsVersion vsVersion) ->
-                sprintf "Backed up document windows for '%s' on branch '%s' from Visual Studio %s" solutionName branch vsVersion
+                sprintf "Backed up Visual Studio settings for '%s' on branch '%s' from Visual Studio %s." solutionName branch vsVersion
             | Restored vsVersions ->
                 vsVersions
                 |> List.map (fun (VsVersion vsVersion) -> vsVersion)
                 |> String.concat ", "
-                |> sprintf "Restored document windows for '%s' to Visual Studio %s" solutionName
+                |> sprintf "Restored Visual Studio settings for '%s' to Visual Studio %s." solutionName
             | Removed count ->
-                sprintf "Removed document window data for %i branches for '%s'" count solutionName
+                sprintf "Removed Visual Studio settings for %i branches for solution '%s'." count solutionName
             | NoSuos ->
-                sprintf "No .suo files found for %s.sln" solutionName
+                sprintf "No .suo files found for %s.sln." solutionName
             | NoDocumentData (BranchName branch) ->
-                sprintf "No saved document window data found for '%s' on branch '%s'" solutionName branch
+                sprintf "No saved Visual Studio settings found for '%s' on branch '%s'." solutionName branch
             | NoPreviousBranch ->
-                sprintf "No previously checked out branch found"
+                sprintf "No previously checked out branch found."
 
     type WindowSettings = IDictionary<BranchName, BranchData>
 
