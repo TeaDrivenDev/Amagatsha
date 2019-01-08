@@ -8,3 +8,4 @@ nuget FSharp.Core
 nuget OpenMcdf
 nuget LiteDB
 nuget LiteDB.FSharp
+nuget System.Collections.Immutable

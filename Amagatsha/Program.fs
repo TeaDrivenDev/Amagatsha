@@ -5,6 +5,8 @@ open System.IO
 [<Literal>]
 let StorageFileSuffix = "branchdocuments"
 
+let systemCollectionsImmutableDummyReference = System.Collections.Immutable.ImmutableArray()
+
 [<AutoOpen>]
 module Prelude =
     let asFst second first = first, second

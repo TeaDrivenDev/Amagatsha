@@ -4,3 +4,4 @@ Argu
 FSharp.Core
 LiteDB
 LiteDB.FSharp
+System.Collections.Immutable
