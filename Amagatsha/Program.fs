@@ -441,25 +441,6 @@ module Storage =
             WindowSettings = None
         }
 
-    let cleanupStorage args (DirectoryPath directory) _ _ (settings : IDictionary<_, _>) =
-        let obsolete =
-            match args with
-            | B ->
-                let localBranches = Fake.Tools.Git.Branches.getLocalBranches directory
-
-                (fun branchData -> localBranches |> List.contains branchData.BranchName |> not)
-            | D daysToKeep ->
-                (fun branchData -> (DateTime.Now - branchData.LastWriteTime).Days > daysToKeep)
-
-        let obsoleteBranches =
-            settings
-            |> Seq.filter (fun (KeyValuePair (_, branchData)) -> obsolete branchData)
-            |> Seq.toList
-
-        obsoleteBranches |> List.iter (settings.Remove >> ignore)
-
-        { ActionResult = Removed obsoleteBranches.Length; WindowSettings = Some settings }
-
     let list listOption directory _ _ (settings : IDictionary<_, _>) =
         let toTimestamp (dateTime : DateTime) = dateTime.ToString TimestampFormat
 
@@ -481,6 +462,19 @@ module Storage =
             WindowSettings = None
         }
 
+    let removeNonExistingBranches (DirectoryPath directory) (settings : IDictionary<_, _>) =
+        let localBranches = Fake.Tools.Git.Branches.getLocalBranches directory
+
+        let obsoleteBranches =
+            settings
+            |> Seq.filter (fun (KeyValuePair (_, branchData)) ->
+                localBranches |> List.contains branchData.BranchName |> not)
+            |> Seq.toList
+
+        obsoleteBranches |> List.iter (settings.Remove >> ignore)
+
+        settings
+
     let withSettings (action : OperationForSingleSolution) branch solutionPath =
         let directory, solutionName = Solution.splitPath solutionPath
 
@@ -494,7 +488,9 @@ module Storage =
                 |> action directory branch suos
 
             result.WindowSettings
-            |> Option.iter (writeWindowSettings directory solutionName)
+            |> Option.iter (
+                removeNonExistingBranches directory
+                >> writeWindowSettings directory solutionName)
 
             result.ActionResult
 
