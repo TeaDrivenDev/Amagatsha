@@ -14,3 +14,6 @@
 #### 1.3.1 - 2019-01-08
 * Fix for version display in console output
 * Temporary fix for missing System.Collections.Immutable.dll
+
+#### 1.4.0 - 2019-02-28
+* VS 2019 support

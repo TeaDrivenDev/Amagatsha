@@ -7,7 +7,7 @@ open System.Runtime.InteropServices
 [<assembly: AssemblyProductAttribute("Amagatsha")>]
 [<assembly: AssemblyCopyrightAttribute("Copyright © TeaDrivenDev 2019")>]
 [<assembly: ComVisibleAttribute(false)>]
-[<assembly: AssemblyVersionAttribute("1.3.1")>]
+[<assembly: AssemblyVersionAttribute("1.4.0")>]
 do ()
 
 module internal AssemblyVersionInformation =
@@ -15,4 +15,4 @@ module internal AssemblyVersionInformation =
     let [<Literal>] AssemblyProduct = "Amagatsha"
     let [<Literal>] AssemblyCopyright = "Copyright © TeaDrivenDev 2019"
     let [<Literal>] ComVisible = false
-    let [<Literal>] AssemblyVersion = "1.3.1"
+    let [<Literal>] AssemblyVersion = "1.4.0"

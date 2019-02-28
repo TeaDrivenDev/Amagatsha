@@ -180,6 +180,7 @@ module Solution =
 
     let findSuos (DirectoryPath directory) (SolutionName solutionName) =
         [
+            Path.Combine(directory, ".vs", solutionName, "v16", ".suo"), VsVersion "2019"
             Path.Combine(directory, ".vs", solutionName, "v15", ".suo"), VsVersion "2017"
             Path.Combine(directory, ".vs", solutionName, "v14", ".suo"), VsVersion "2015"
             // Path.Combine(directory, sprintf "%s.v12.suo" solutionName), "2013"
